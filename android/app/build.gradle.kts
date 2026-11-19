@@ -17,7 +17,7 @@ android {
         }
     }
     namespace = "app.pocketssh.pocket_ssh"
-    compileSdk = 35
+    compileSdk = flutter.compileSdkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

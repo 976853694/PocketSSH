@@ -1,0 +1,121 @@
+name: iOS, macOS and Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'ios/**'
+      - 'macos/**'
+      - 'windows/**'
+      - 'pubspec.*'
+      - 'test/**'
+      - '.github/workflows/platforms.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.35.7'
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+
+  ios:
+    needs: verify
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      - name: Package IPA
+        run: |
+          mkdir -p dist/Payload
+          ditto build/ios/iphoneos/Runner.app dist/Payload/PocketSSH.app
+          test -x dist/Payload/PocketSSH.app/Runner
+          test ! -e dist/Payload/PocketSSH.app/embedded.mobileprovision
+          if codesign --verify dist/Payload/PocketSSH.app; then exit 1; fi
+          cd dist
+          zip -qry PocketSSH-iOS.ipa Payload
+          unzip -tq PocketSSH-iOS.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketSSH-iOS
+          path: dist/PocketSSH-iOS.ipa
+          if-no-files-found: error
+
+  macos:
+    needs: verify
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - name: Package macOS app
+        run: |
+          mkdir -p dist
+          app=build/macos/Build/Products/Release/pocket_ssh.app
+          test -x "$app/Contents/MacOS/pocket_ssh"
+          lipo -archs "$app/Contents/MacOS/pocket_ssh"
+          if codesign -d "$app" 2>/dev/null; then codesign --remove-signature "$app"; fi
+          if codesign --verify "$app"; then exit 1; fi
+          ditto -c -k --keepParent "$app" dist/PocketSSH-macOS.zip
+          unzip -tq dist/PocketSSH-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketSSH-macOS
+          path: dist/PocketSSH-macOS.zip
+          if-no-files-found: error
+
+  windows:
+    needs: verify
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build windows --release
+      - name: Package Windows executable and runtime
+        shell: pwsh
+        run: |
+          $bundle = 'build/windows/x64/runner/Release'
+          if (!(Test-Path "$bundle/pocket_ssh.exe") -or !(Test-Path "$bundle/flutter_windows.dll") -or !(Test-Path "$bundle/data/flutter_assets")) { throw 'Incomplete Windows bundle' }
+          $signature = Get-AuthenticodeSignature "$bundle/pocket_ssh.exe"
+          if ($signature.Status -ne 'NotSigned') { throw 'Unexpected executable signature' }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path "$bundle/*" -DestinationPath dist/PocketSSH-Windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketSSH-Windows-x64
+          path: dist/PocketSSH-Windows-x64.zip
+          if-no-files-found: error

@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'host_trust.dart';
+import 'device_bridge.dart';
 
 class HostProfile {
   HostProfile({
@@ -82,8 +82,9 @@ class Credentials {
 }
 
 class AppStore extends ChangeNotifier {
-  AppStore({this.channel = androidBridge});
+  AppStore({this.channel = nativeDeviceChannel});
   final MethodChannel channel;
+  DeviceBridge get _device => DeviceBridge(channel: channel);
   final List<HostProfile> hosts = [];
   final List<String> snippets = [];
   final List<String> recentCommands = [];
@@ -98,7 +99,7 @@ class AppStore extends ChangeNotifier {
 
   Future<void> load() async {
     try {
-      final raw = await channel.invokeMethod<String>('loadState');
+      final raw = await _device.invokeMethod<String>('loadState');
       if (raw != null) {
         final j = jsonDecode(raw) as Map<String, dynamic>;
         hosts.addAll(
@@ -127,7 +128,7 @@ class AppStore extends ChangeNotifier {
   }
 
   Future<void> save() async {
-    await channel.invokeMethod<void>(
+    await _device.invokeMethod<void>(
       'saveState',
       jsonEncode({
         'hosts': hosts.map((h) => h.toJson()).toList(),
@@ -149,11 +150,11 @@ class AppStore extends ChangeNotifier {
 
   Future<bool> isUnlocked() => unlock();
   Future<bool> unlock() async =>
-      !deviceLock || await channel.invokeMethod<bool>('authenticate') == true;
+      !deviceLock || await _device.invokeMethod<bool>('authenticate') == true;
   Future<String?> secret(String key) =>
-      channel.invokeMethod<String>('readSecret', key);
+      _device.invokeMethod<String>('readSecret', key);
   Future<void> putSecret(String key, String? value) =>
-      channel.invokeMethod<void>('writeSecret', {'key': key, 'value': value});
+      _device.invokeMethod<void>('writeSecret', {'key': key, 'value': value});
   Future<Credentials?> credentials(
     HostProfile host, {
     bool authenticate = true,

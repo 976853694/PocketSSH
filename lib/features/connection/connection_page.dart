@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/app_store.dart';
-import '../../core/host_trust.dart';
+import '../../core/device_bridge.dart';
 import '../../core/ssh_connection.dart';
 
 class ConnectionPage extends StatefulWidget {
@@ -322,7 +322,7 @@ Future<Credentials?> requestCredentials(
                       : () async {
                           setState(() => busy = true);
                           try {
-                            final bytes = await androidBridge
+                            final bytes = await deviceBridge
                                 .invokeMethod<Uint8List>('pickKey');
                             if (bytes != null) {
                               try {

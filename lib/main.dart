@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'core/ai_endpoint.dart';
 import 'core/app_store.dart';
 import 'core/host_trust.dart';
+import 'core/device_bridge.dart';
 import 'core/sessions.dart';
 import 'core/ssh_connection.dart';
 import 'features/connection/connection_page.dart';
@@ -38,7 +39,7 @@ class _PocketSshAppState extends State<PocketSshApp> {
     final active =
         store.keepAwake && sessions.items.any((session) => session.connected);
     unawaited(
-      androidBridge.invokeMethod<void>('keepAwake', active).catchError((_) {}),
+      deviceBridge.invokeMethod<void>('keepAwake', active).catchError((_) {}),
     );
   }
 
@@ -809,7 +810,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> setDeviceLock(bool value) async {
     try {
       final authenticated =
-          await androidBridge.invokeMethod<bool>('authenticate') == true;
+          await deviceBridge.invokeMethod<bool>('authenticate') == true;
       if (!authenticated) return;
       widget.store.deviceLock = value;
       await widget.store.save();
@@ -901,10 +902,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     value: widget.store.keepAwake,
                     onChanged: (value) async {
                       widget.store.keepAwake = value;
-                      await androidBridge.invokeMethod<void>(
-                        'keepAwake',
-                        value,
-                      );
+                      await deviceBridge.invokeMethod<void>('keepAwake', value);
                       await widget.store.save();
                     },
                   ),

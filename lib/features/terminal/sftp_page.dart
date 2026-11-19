@@ -4,7 +4,7 @@ import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/app_store.dart';
-import '../../core/host_trust.dart';
+import '../../core/device_bridge.dart';
 import '../../core/sessions.dart';
 
 class SftpPage extends StatefulWidget {
@@ -86,7 +86,7 @@ class _SftpPageState extends State<SftpPage> {
     String? targetPath;
     SftpFile? remote;
     try {
-      final file = await androidBridge.invokeMethod<Map>('pickUpload');
+      final file = await deviceBridge.invokeMethod<Map>('pickUpload');
       if (file == null || !mounted) return;
       final uri = documentUri = file['uri']! as String;
       final name = file['name']! as String;
@@ -115,7 +115,7 @@ class _SftpPageState extends State<SftpPage> {
             SftpFileOpenMode.write,
       );
       while (!cancelled) {
-        final chunk = await androidBridge.invokeMethod<Uint8List>(
+        final chunk = await deviceBridge.invokeMethod<Uint8List>(
           'readChunk',
           uri,
         );
@@ -154,7 +154,7 @@ class _SftpPageState extends State<SftpPage> {
         } catch (_) {}
       }
       retryTask = null;
-      await androidBridge.invokeMethod<void>('closeDocument', uri);
+      await deviceBridge.invokeMethod<void>('closeDocument', uri);
       documentUri = null;
       await load(directory);
       if (mounted) {
@@ -185,7 +185,7 @@ class _SftpPageState extends State<SftpPage> {
       }
       if (documentUri != null) {
         try {
-          await androidBridge.invokeMethod<void>('closeDocument', documentUri);
+          await deviceBridge.invokeMethod<void>('closeDocument', documentUri);
         } catch (_) {}
       }
       if (mounted) setState(() => task = '');
@@ -204,11 +204,15 @@ class _SftpPageState extends State<SftpPage> {
     String? uri;
     SftpFile? remote;
     try {
-      final target = await androidBridge.invokeMethod<Map>(
+      final target = await deviceBridge.invokeMethod<Map>(
         'createDownload',
         entry.filename,
       );
       if (target == null) return;
+      if (!mounted) {
+        await deviceBridge.invokeMethod<bool>('deleteDocument', target['uri']);
+        return;
+      }
       uri = target['uri']! as String;
       retryTask = () => download(entry);
       cancelled = false;
@@ -223,7 +227,7 @@ class _SftpPageState extends State<SftpPage> {
       publishProgress();
       await for (final chunk in remote.read()) {
         if (cancelled) break;
-        await androidBridge.invokeMethod<void>('writeChunk', {
+        await deviceBridge.invokeMethod<void>('writeChunk', {
           'uri': uri,
           'bytes': chunk,
         });
@@ -234,7 +238,7 @@ class _SftpPageState extends State<SftpPage> {
       if (cancelled) throw StateError('传输已取消');
       await remote.close();
       remote = null;
-      await androidBridge.invokeMethod<void>('closeDocument', uri);
+      await deviceBridge.invokeMethod<void>('finishDownload', uri);
       uri = null;
       if (mounted && !cancelled) {
         ScaffoldMessenger.of(
@@ -247,7 +251,7 @@ class _SftpPageState extends State<SftpPage> {
     } catch (_) {
       if (uri != null) {
         try {
-          await androidBridge.invokeMethod<bool>('deleteDocument', uri);
+          await deviceBridge.invokeMethod<bool>('deleteDocument', uri);
           uri = null;
         } catch (_) {}
       }
@@ -266,7 +270,7 @@ class _SftpPageState extends State<SftpPage> {
     } finally {
       await remote?.close();
       if (uri != null) {
-        await androidBridge.invokeMethod<void>('closeDocument', uri);
+        await deviceBridge.invokeMethod<void>('closeDocument', uri);
       }
       if (mounted) setState(() => task = '');
       if (widget.session.transferStatus != '下载失败' &&
