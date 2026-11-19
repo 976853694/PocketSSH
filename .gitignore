@@ -11,4 +11,5 @@
 /android/local.properties
 /android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
 *.jks
+*.keystore
 /android/key.properties

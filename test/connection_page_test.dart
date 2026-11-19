@@ -1,6 +1,10 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:pocket_ssh/main.dart';
+import 'package:pocket_ssh/core/app_store.dart';
+import 'package:pocket_ssh/core/sessions.dart';
 import 'package:pocket_ssh/core/ssh_connection.dart';
+import 'package:pocket_ssh/features/connection/connection_page.dart';
+import 'package:pocket_ssh/main.dart';
 
 void main() {
   test('normalizes host names and formats IPv6 endpoints with their ports', () {
@@ -12,24 +16,71 @@ void main() {
     expect(normalizeHost('server.example:22'), isNull);
   });
 
-  testWidgets('empty credentials are rejected before navigating',
-      (tester) async {
-    await tester.pumpWidget(const PocketSshApp());
-    final connect = find.text('连接');
-    await tester.ensureVisible(connect);
-    await tester.tap(connect);
-    await tester.pump();
-    expect(find.text('请输入有效的主机名或 IP'), findsOneWidget);
-    expect(find.text('请输入用户名'), findsOneWidget);
-    expect(find.text('请输入密码'), findsOneWidget);
+  testWidgets('home exposes host, transfer and settings navigation', (
+    tester,
+  ) async {
+    final store = AppStore();
+    final sessions = Sessions();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    expect(find.text('Pocket SSH'), findsOneWidget);
+    expect(find.text('主机'), findsOneWidget);
+    expect(find.text('传输'), findsOneWidget);
+    expect(find.text('设置'), findsOneWidget);
+    expect(find.text('添加第一台服务器'), findsOneWidget);
+    await tester.tap(find.text('设置'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('AI 助手'),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('AI 助手'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('终端字体大小'),
+      100,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('终端字体大小'), findsOneWidget);
+    sessions.dispose();
+    store.dispose();
   });
 
-  testWidgets('choosing private-key auth replaces the password field',
-      (tester) async {
-    await tester.pumpWidget(const PocketSshApp());
+  testWidgets('host profile form exposes connection and jump-host fields', (
+    tester,
+  ) async {
+    final store = AppStore();
+    final sessions = Sessions();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    await tester.tap(find.byTooltip('添加主机'));
+    await tester.pumpAndSettle();
+    expect(find.byType(Form), findsOneWidget);
+    expect(find.text('添加主机'), findsOneWidget);
+    expect(find.text('服务器地址'), findsOneWidget);
+    expect(find.text('用户名'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(find.text('高级连接'), findsOneWidget);
+    sessions.dispose();
+    store.dispose();
+  });
+
+  testWidgets('connection form can select private-key authentication', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(home: ConnectionPage(quick: true)),
+    );
     await tester.tap(find.text('私钥'));
     await tester.pumpAndSettle();
-    expect(find.text('选择私钥文件'), findsOneWidget);
-    expect(find.text('私钥口令（可选）'), findsOneWidget);
+    expect(find.text('保存主机'), findsNothing);
+    expect(find.text('私钥'), findsOneWidget);
   });
 }

@@ -273,7 +273,7 @@ packages:
     source: hosted
     version: "5.4.0"
   xterm2_core:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: xterm2_core
       sha256: "500ac551e448d8fa9766671aba26303dd5979d9d1af93df77af80afae16c75de"

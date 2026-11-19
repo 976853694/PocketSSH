@@ -12,6 +12,7 @@ dependencies:
     sdk: flutter
   dartssh2: ^4.1.0
   xterm2: ^5.4.0
+  xterm2_core: ^1.0.0
 
 dev_dependencies:
   flutter_test:

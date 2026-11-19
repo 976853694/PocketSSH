@@ -35,44 +35,52 @@ void main() {
 
   test('first connection only remembers an accepted fingerprint', () async {
     expect(
-        await trust.verify(
-            endpoint: endpoint,
-            fingerprint: fingerprint,
-            confirm: () async => false),
-        isFalse);
+      await trust.verify(
+        endpoint: endpoint,
+        fingerprint: fingerprint,
+        confirm: () async => false,
+      ),
+      isFalse,
+    );
     expect(pins, isEmpty);
     expect(
-        await trust.verify(
-            endpoint: endpoint,
-            fingerprint: fingerprint,
-            confirm: () async => true),
-        isTrue);
+      await trust.verify(
+        endpoint: endpoint,
+        fingerprint: fingerprint,
+        confirm: () async => true,
+      ),
+      isTrue,
+    );
     expect(pins[endpoint], fingerprint);
   });
 
   test('a matching fingerprint is accepted without a second prompt', () async {
     pins[endpoint] = fingerprint;
     expect(
-        await trust.verify(
-            endpoint: endpoint,
-            fingerprint: fingerprint,
-            confirm: () async => fail('unexpected prompt')),
-        isTrue);
+      await trust.verify(
+        endpoint: endpoint,
+        fingerprint: fingerprint,
+        confirm: () async => fail('unexpected prompt'),
+      ),
+      isTrue,
+    );
   });
 
   test(
-      'a changed fingerprint is blocked and leaves the known fingerprint intact',
-      () async {
-    pins[endpoint] = fingerprint;
-    await expectLater(
-      trust.verify(
+    'a changed fingerprint is blocked and leaves the known fingerprint intact',
+    () async {
+      pins[endpoint] = fingerprint;
+      await expectLater(
+        trust.verify(
           endpoint: endpoint,
           fingerprint: 'SHA256:changed',
-          confirm: () async => fail('unexpected prompt')),
-      throwsA(isA<HostKeyChanged>()),
-    );
-    expect(pins[endpoint], fingerprint);
-  });
+          confirm: () async => fail('unexpected prompt'),
+        ),
+        throwsA(isA<HostKeyChanged>()),
+      );
+      expect(pins[endpoint], fingerprint);
+    },
+  );
 
   test('trust is scoped to one host and port', () async {
     pins[endpoint] = fingerprint;
@@ -88,9 +96,10 @@ void main() {
     });
     await expectLater(
       trust.verify(
-          endpoint: endpoint,
-          fingerprint: fingerprint,
-          confirm: () async => true),
+        endpoint: endpoint,
+        fingerprint: fingerprint,
+        confirm: () async => true,
+      ),
       throwsA(isA<PlatformException>()),
     );
   });
