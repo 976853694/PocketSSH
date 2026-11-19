@@ -100,6 +100,40 @@ void main() {
     },
   );
 
+  test(
+    'remembered login can reuse and remove either credential type',
+    () async {
+      final store = AppStore(channel: channel);
+      final host = HostProfile(
+        id: 'server',
+        name: 'Server',
+        host: 'host.example',
+      );
+      store.hosts.add(host);
+      await store.rememberCredentials(
+        host,
+        Credentials(password: 'fixture', remember: true),
+      );
+      expect((await store.credentials(host))?.password, 'fixture');
+      expect(saved['state'], isNot(contains('fixture')));
+      host.keyAuth = true;
+      await store.rememberCredentials(
+        host,
+        Credentials(
+          key: 'fixture-key',
+          passphrase: 'fixture-passphrase',
+          remember: true,
+        ),
+      );
+      expect((await store.credentials(host))?.key, 'fixture-key');
+      expect((await store.credentials(host))?.passphrase, 'fixture-passphrase');
+      await store.rememberCredentials(host, Credentials(remember: false));
+      expect(await store.credentials(host), isNull);
+      expect(secrets, isEmpty);
+      store.dispose();
+    },
+  );
+
   test('AI context redacts private keys and common credential fields', () {
     final text = [
       'Author'

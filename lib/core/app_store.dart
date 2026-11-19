@@ -61,7 +61,13 @@ class HostProfile {
 }
 
 class Credentials {
-  Credentials({this.password = '', this.key = '', this.passphrase = ''});
+  Credentials({
+    this.password = '',
+    this.key = '',
+    this.passphrase = '',
+    this.remember,
+  });
+  final bool? remember;
   String password, key, passphrase;
   Map<String, dynamic> toJson() => {
     'password': password,
@@ -158,6 +164,29 @@ class AppStore extends ChangeNotifier {
     return raw == null
         ? null
         : Credentials.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+  }
+
+  Future<void> rememberCredentials(
+    HostProfile host,
+    Credentials credentials,
+  ) async {
+    final profile = hosts.where((item) => item.id == host.id).firstOrNull;
+    if (profile == null ||
+        credentials.remember == null ||
+        profile.host != host.host ||
+        profile.port != host.port ||
+        profile.username != host.username ||
+        profile.keyAuth != host.keyAuth) {
+      return;
+    }
+    final remember = credentials.remember!;
+    await putSecret(
+      'host:${host.id}',
+      remember ? jsonEncode(credentials.toJson()) : null,
+    );
+    profile.remember = remember;
+    host.remember = remember;
+    await save();
   }
 
   Future<void> deleteHost(HostProfile host) async {

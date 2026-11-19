@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm2/xterm.dart';
@@ -75,18 +74,11 @@ class _TerminalPageState extends State<TerminalPage> {
       widget.verify,
       jump: jump,
       jumpCredentials: jumpCredentials,
-      onAuthenticated: session.profile.remember
-          ? () => widget.store.putSecret(
-              'host:${session.profile.id}',
-              jsonEncode(credentials.toJson()),
-            )
-          : null,
-      onJumpAuthenticated: jump != null && jump.remember
-          ? () => widget.store.putSecret(
-              'host:${jump!.id}',
-              jsonEncode(jumpCredentials!.toJson()),
-            )
-          : null,
+      onAuthenticated: () =>
+          widget.store.rememberCredentials(session.profile, credentials),
+      onJumpAuthenticated: jump == null
+          ? null
+          : () => widget.store.rememberCredentials(jump!, jumpCredentials!),
     );
   }
 

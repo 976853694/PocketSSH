@@ -292,15 +292,19 @@ class _ConnectionPageState extends State<ConnectionPage> {
 Future<Credentials?> requestCredentials(
   BuildContext context,
   HostProfile host,
-  AppStore store,
-) async {
-  final saved = await store.credentials(host);
+  AppStore store, {
+  bool forcePrompt = false,
+}) async {
+  final saved = forcePrompt ? null : await store.credentials(host);
+  if (forcePrompt && host.remember && !await store.unlock()) return null;
   if (saved != null || !context.mounted) return saved;
   final secret = TextEditingController();
   String key = '';
   bool busy = false;
+  final canRemember = store.hosts.any((item) => item.id == host.id);
+  var remember = host.remember;
   String? error;
-  final result = await showDialog<Credentials>(
+  final route = DialogRoute<Credentials>(
     context: context,
     builder: (dialog) => StatefulBuilder(
       builder: (context, setState) => AlertDialog(
@@ -345,6 +349,14 @@ Future<Credentials?> requestCredentials(
                   errorText: error,
                 ),
               ),
+              if (canRemember)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(host.keyAuth ? '加密记住私钥和口令' : '加密记住密码'),
+                  value: remember,
+                  onChanged: (value) =>
+                      setState(() => remember = value == true),
+                ),
             ],
           ),
         ),
@@ -364,8 +376,15 @@ Future<Credentials?> requestCredentials(
                     Navigator.pop(
                       dialog,
                       host.keyAuth
-                          ? Credentials(key: key, passphrase: secret.text)
-                          : Credentials(password: secret.text),
+                          ? Credentials(
+                              key: key,
+                              passphrase: secret.text,
+                              remember: canRemember ? remember : null,
+                            )
+                          : Credentials(
+                              password: secret.text,
+                              remember: canRemember ? remember : null,
+                            ),
                     );
                   },
             child: const Text('连接'),
@@ -374,6 +393,8 @@ Future<Credentials?> requestCredentials(
       ),
     ),
   );
+  final result = await Navigator.of(context, rootNavigator: true).push(route);
+  await route.completed;
   secret.dispose();
   return result;
 }

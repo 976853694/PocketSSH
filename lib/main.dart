@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'core/ai_endpoint.dart';
 import 'core/app_store.dart';
 import 'core/host_trust.dart';
 import 'core/sessions.dart';
@@ -217,9 +219,35 @@ class _PocketHomeState extends State<PocketHome> {
     }
   }
 
-  Future<void> connect(HostProfile host) async {
+  bool connecting = false;
+
+  Future<void> connect(
+    HostProfile host, {
+    bool sftp = false,
+    bool replaceCredentials = false,
+  }) async {
+    if (connecting) return;
+    setState(() => connecting = true);
     try {
-      final credentials = await requestCredentials(context, host, widget.store);
+      if (sftp) {
+        final active = widget.sessions.items
+            .where((item) => item.profile.id == host.id && item.connected)
+            .firstOrNull;
+        if (active != null) {
+          await Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => SftpPage(session: active, store: widget.store),
+            ),
+          );
+          return;
+        }
+      }
+      final credentials = await requestCredentials(
+        context,
+        host,
+        widget.store,
+        forcePrompt: replaceCredentials,
+      );
       if (credentials == null || !mounted) return;
       Credentials? jumpCredentials;
       if (host.jumpId case final jumpId?) {
@@ -231,6 +259,39 @@ class _PocketHomeState extends State<PocketHome> {
         if (jumpCredentials == null || !mounted) return;
       }
       final session = WorkspaceSession(host, widget.store.scrollback);
+      if (sftp) {
+        try {
+          final jump = widget.store.hosts
+              .where((item) => item.id == host.jumpId)
+              .firstOrNull;
+          await session.open(
+            credentials,
+            verify,
+            jump: jump,
+            jumpCredentials: jumpCredentials,
+            fileOnly: true,
+            onAuthenticated: () =>
+                widget.store.rememberCredentials(host, credentials),
+            onJumpAuthenticated: jump == null
+                ? null
+                : () =>
+                      widget.store.rememberCredentials(jump, jumpCredentials!),
+          );
+          if (!mounted) return;
+          if (!session.connected) throw StateError(session.status);
+          host.lastUsed = DateTime.now();
+          await widget.store.save();
+          if (!mounted) return;
+          await Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => SftpPage(session: session, store: widget.store),
+            ),
+          );
+        } finally {
+          session.stop();
+        }
+        return;
+      }
       widget.sessions.add(session);
       host.lastUsed = DateTime.now();
       await widget.store.save();
@@ -258,6 +319,8 @@ class _PocketHomeState extends State<PocketHome> {
           ),
         );
       }
+    } finally {
+      if (mounted) setState(() => connecting = false);
     }
   }
 
@@ -477,11 +540,23 @@ class _PocketHomeState extends State<PocketHome> {
                         trailing: PopupMenuButton<String>(
                           onSelected: (value) {
                             if (value == 'edit') edit(host);
+                            if (value == 'sftp') connect(host, sftp: true);
+                            if (value == 'credentials') {
+                              connect(host, replaceCredentials: true);
+                            }
                             if (value == 'delete') removeHost(host);
                             if (value == 'trust') forgetTrust(host);
                           },
                           itemBuilder: (_) => const [
                             PopupMenuItem(value: 'edit', child: Text('编辑')),
+                            PopupMenuItem(
+                              value: 'sftp',
+                              child: Text('打开 SFTP'),
+                            ),
+                            PopupMenuItem(
+                              value: 'credentials',
+                              child: Text('更换登录凭据'),
+                            ),
                             PopupMenuItem(
                               value: 'trust',
                               child: Text('重新核对指纹'),
@@ -531,7 +606,21 @@ class _PocketHomeState extends State<PocketHome> {
   Widget transfersPage() => CustomScrollView(
     slivers: [
       const SliverAppBar(floating: true, title: Text('SFTP 传输')),
-      if (widget.sessions.items.isEmpty)
+      if (connecting)
+        const SliverToBoxAdapter(child: LinearProgressIndicator()),
+      for (final host in widget.store.hosts)
+        SliverToBoxAdapter(
+          child: ListTile(
+            leading: const Icon(Icons.folder_open_outlined),
+            title: Text(host.name),
+            subtitle: Text(
+              SshTarget(host.host, host.port, host.username).label,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: connecting ? null : () => connect(host, sftp: true),
+          ),
+        ),
+      if (widget.sessions.items.isEmpty && widget.store.hosts.isEmpty)
         const SliverFillRemaining(
           hasScrollBody: false,
           child: _EmptyStateMessage(
@@ -615,6 +704,55 @@ class _SettingsPageState extends State<SettingsPage> {
   late final model = TextEditingController(text: widget.store.aiModel);
   final apiKey = TextEditingController();
   bool hidden = true;
+  bool aiBusy = false;
+  String? aiStatus;
+  bool removeAiKey = false;
+  List<String> models = [];
+
+  Future<void> checkAi({required bool listModels}) async {
+    final uri = chatEndpoint(endpoint.text);
+    final selectedModel = model.text.trim();
+    if (uri == null || (!listModels && selectedModel.isEmpty)) {
+      setState(() => aiStatus = '请填写有效的 HTTPS 地址${listModels ? '' : '和模型名称'}');
+      return;
+    }
+    setState(() {
+      aiBusy = true;
+      aiStatus = null;
+    });
+    try {
+      String? key = apiKey.text.trim();
+      if (key.isEmpty &&
+          !removeAiKey &&
+          widget.store.aiEndpoint == uri.toString()) {
+        if (!await widget.store.unlock() || !mounted) return;
+        key = await widget.store.secret('ai:$uri');
+      }
+      final result = await checkAiEndpoint(
+        uri,
+        key,
+        model: listModels ? null : selectedModel,
+      );
+      if (!mounted) return;
+      setState(() {
+        if (listModels) models = result;
+        aiStatus = listModels
+            ? (result.isEmpty ? '服务未列出模型，可手动填写' : '已获取 ${result.length} 个模型')
+            : '模型已返回流式回复';
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(
+          () => aiStatus = error is HttpException
+              ? error.message
+              : '请求失败，请检查地址、密钥和模型',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => aiBusy = false);
+    }
+  }
+
   @override
   void dispose() {
     endpoint.dispose();
@@ -624,31 +762,47 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> saveAi() async {
-    final uri = Uri.tryParse(endpoint.text.trim());
-    if (uri == null ||
-        uri.scheme != 'https' ||
-        uri.host.isEmpty ||
-        uri.userInfo.isNotEmpty ||
-        model.text.trim().isEmpty) {
+    final uri = chatEndpoint(endpoint.text);
+    if (uri == null || model.text.trim().isEmpty) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('请输入有效的 HTTPS 服务地址和模型')));
       return;
     }
-    if (widget.store.aiEndpoint != uri.toString()) {
-      await widget.store.putSecret('ai:${widget.store.aiEndpoint}', null);
-    }
-    widget.store.aiEndpoint = uri.toString();
-    widget.store.aiModel = model.text.trim();
-    if (apiKey.text.isNotEmpty) {
-      await widget.store.putSecret('ai:$uri', apiKey.text);
-      apiKey.clear();
-    }
-    await widget.store.save();
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('AI 设置已加密保存')));
+    final previousEndpoint = widget.store.aiEndpoint;
+    final previousModel = widget.store.aiModel;
+    setState(() {
+      aiBusy = true;
+      aiStatus = null;
+    });
+    try {
+      if (removeAiKey) {
+        if (!await widget.store.unlock() || !mounted) return;
+        await widget.store.putSecret('ai:$uri', null);
+      } else if (apiKey.text.trim().isNotEmpty) {
+        await widget.store.putSecret('ai:$uri', apiKey.text.trim());
+      }
+      widget.store.aiEndpoint = uri.toString();
+      widget.store.aiModel = model.text.trim();
+      try {
+        await widget.store.save();
+      } catch (_) {
+        widget.store.aiEndpoint = previousEndpoint;
+        widget.store.aiModel = previousModel;
+        rethrow;
+      }
+      if (mounted) {
+        endpoint.text = uri.toString();
+        apiKey.clear();
+        setState(() {
+          removeAiKey = false;
+          aiStatus = 'AI 设置已保存';
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => aiStatus = '无法保存 AI 设置，请重试');
+    } finally {
+      if (mounted) setState(() => aiBusy = false);
     }
   }
 
@@ -771,21 +925,31 @@ class _SettingsPageState extends State<SettingsPage> {
                   children: [
                     TextField(
                       controller: endpoint,
+                      enabled: !aiBusy,
+                      onChanged: (_) => setState(() {
+                        models = [];
+                        aiStatus = null;
+                        removeAiKey = false;
+                      }),
                       keyboardType: TextInputType.url,
                       decoration: const InputDecoration(
-                        labelText: 'OpenAI 兼容 HTTPS 接口',
+                        labelText: 'OpenAI 兼容 HTTPS 地址或接口',
                         hintText: 'https://api.example.com/v1/chat/completions',
                       ),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: model,
+                      enabled: !aiBusy,
                       decoration: const InputDecoration(labelText: '模型名称'),
                     ),
                     const SizedBox(height: 10),
                     TextField(
                       controller: apiKey,
                       obscureText: hidden,
+                      enabled: !aiBusy && !removeAiKey,
+                      enableSuggestions: false,
+                      autocorrect: false,
                       decoration: InputDecoration(
                         labelText: 'API 密钥（留空保留现有密钥）',
                         suffixIcon: IconButton(
@@ -797,12 +961,61 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const Text('只有确认发送后才会向模型发送你核对过的上下文；建议命令仅作为草稿，不会自动执行。'),
+                    if (widget.store.aiEndpoint.isNotEmpty &&
+                        chatEndpoint(endpoint.text)?.toString() ==
+                            widget.store.aiEndpoint)
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('保存时清除现有 API 密钥'),
+                        value: removeAiKey,
+                        onChanged: aiBusy
+                            ? null
+                            : (value) =>
+                                  setState(() => removeAiKey = value == true),
+                      ),
+                    if (models.isNotEmpty)
+                      DropdownMenu<String>(
+                        expandedInsets: EdgeInsets.zero,
+                        enabled: !aiBusy,
+                        enableFilter: true,
+                        label: const Text('从服务模型列表选择'),
+                        dropdownMenuEntries: [
+                          for (final name in models)
+                            DropdownMenuEntry(value: name, label: name),
+                        ],
+                        onSelected: (value) {
+                          if (value != null) model.text = value;
+                        },
+                      ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton(
+                          onPressed: aiBusy
+                              ? null
+                              : () => checkAi(listModels: true),
+                          child: const Text('获取模型列表'),
+                        ),
+                        OutlinedButton(
+                          onPressed: aiBusy
+                              ? null
+                              : () => checkAi(listModels: false),
+                          child: const Text('测试模型连接'),
+                        ),
+                      ],
+                    ),
+                    if (aiBusy) const LinearProgressIndicator(),
+                    if (aiStatus != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(aiStatus!),
+                      ),
+                    const Text('连接测试会发送一条固定消息。终端内容在 AI 面板中确认后才会发送。'),
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,
                       child: FilledButton(
-                        onPressed: saveAi,
+                        onPressed: aiBusy ? null : saveAi,
                         child: const Text('加密保存 AI 设置'),
                       ),
                     ),

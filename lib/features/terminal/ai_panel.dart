@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/app_store.dart';
+import '../../core/ai_endpoint.dart';
 
 class AiPanel extends StatefulWidget {
   const AiPanel({
@@ -94,14 +95,9 @@ class _AiPanelState extends State<AiPanel> {
       await for (final line in lines) {
         if (!mounted || client != http) break;
         if (!line.startsWith('data:')) continue;
-        final data = line.substring(5).trim();
-        if (data == '[DONE]') break;
-        final payload = jsonDecode(data) as Map;
-        final choices = payload['choices'] as List?;
-        if (choices == null || choices.isEmpty) continue;
-        final delta = choices.first['delta'] as Map?;
-        final text = delta?['content'];
-        if (text is String) setState(() => answer += text);
+        if (line.substring(5).trim() == '[DONE]') break;
+        final text = aiStreamText(line);
+        if (text != null) setState(() => answer += text);
         if (answer.length > 64000) break;
       }
       if (mounted && client == http && answer.isEmpty) {

@@ -59,6 +59,7 @@ class WorkspaceSession extends ChangeNotifier {
     Credentials? jumpCredentials,
     Future<void> Function()? onAuthenticated,
     Future<void> Function()? onJumpAuthenticated,
+    bool fileOnly = false,
   }) async {
     if (connected || opening) return;
     if (finished) {
@@ -121,8 +122,16 @@ class WorkspaceSession extends ChangeNotifier {
                   .forward(target.host, target.port)
                   .timeout(const Duration(seconds: 15)),
         onAuthenticated: onAuthenticated,
+        shell: !fileOnly,
       );
       if (finished) return;
+      if (fileOnly) {
+        opening = false;
+        connected = true;
+        status = '已连接';
+        notifyListeners();
+        return;
+      }
       if (shell == null) throw StateError('未创建终端');
       _shell = shell;
       opening = false;
