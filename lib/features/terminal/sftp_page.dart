@@ -24,6 +24,7 @@ class _SftpPageState extends State<SftpPage> {
   int transferred = 0;
   String task = '';
   bool cancelled = false;
+  bool _transferInProgress = false;
   Future<void> Function()? retryTask;
   void publishProgress() {
     if (task.isNotEmpty) widget.session.transferStatus = task;
@@ -79,7 +80,9 @@ class _SftpPageState extends State<SftpPage> {
   }
 
   Future<void> pickUpload() async {
-    if (client == null || loading || task.isNotEmpty) return;
+    if (client == null || loading || _transferInProgress) return;
+    _transferInProgress = true;
+    cancelled = false;
     String? documentUri;
     String? partialPath;
     String? backupPath;
@@ -87,18 +90,24 @@ class _SftpPageState extends State<SftpPage> {
     SftpFile? remote;
     try {
       final file = await deviceBridge.invokeMethod<Map>('pickUpload');
-      if (file == null || !mounted) return;
+      if (file == null) return;
       final uri = documentUri = file['uri']! as String;
+      if (!mounted) return;
       final name = file['name']! as String;
       final size = file['size'] as int? ?? 0;
       if (!validName(name)) throw const FormatException();
       final path = targetPath = child(directory, name);
       var exists = false;
       try {
-        await client!.stat(child(directory, name));
+        final attrs = await client!.stat(path, followLink: false);
+        if (attrs.isDirectory) throw StateError('目标是目录');
         exists = true;
-      } catch (_) {}
-      if (exists && !await confirm('覆盖 $name？')) return;
+      } on SftpStatusError catch (error) {
+        if (error.code != SftpStatusCode.noSuchFile) rethrow;
+      }
+      if (!mounted || (exists && !await confirm('覆盖 $name？')) || !mounted) {
+        return;
+      }
       cancelled = false;
       transferred = 0;
       retryTask = pickUpload;
@@ -172,7 +181,10 @@ class _SftpPageState extends State<SftpPage> {
         );
       }
     } finally {
-      await remote?.close();
+      try {
+        await remote?.close();
+      } catch (_) {}
+      _transferInProgress = false;
       if (partialPath != null && client != null) {
         try {
           await client!.remove(partialPath);
@@ -200,7 +212,9 @@ class _SftpPageState extends State<SftpPage> {
   }
 
   Future<void> download(SftpName entry) async {
-    if (client == null || loading || task.isNotEmpty) return;
+    if (client == null || loading || _transferInProgress) return;
+    _transferInProgress = true;
+    cancelled = false;
     String? uri;
     SftpFile? remote;
     try {
@@ -268,7 +282,10 @@ class _SftpPageState extends State<SftpPage> {
         );
       }
     } finally {
-      await remote?.close();
+      try {
+        await remote?.close();
+      } catch (_) {}
+      _transferInProgress = false;
       if (uri != null) {
         await deviceBridge.invokeMethod<void>('closeDocument', uri);
       }

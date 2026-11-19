@@ -1,15 +1,27 @@
-name: iOS, macOS and Windows
+name: PocketSSH builds
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
+    tags: ['v*']
     paths:
-      - 'lib/**'
+      - '**.dart'
+      - 'android/**'
       - 'ios/**'
       - 'macos/**'
       - 'windows/**'
       - 'pubspec.*'
-      - 'test/**'
+      - 'analysis_options.yaml'
+      - '.github/workflows/platforms.yml'
+  pull_request:
+    paths:
+      - '**.dart'
+      - 'android/**'
+      - 'ios/**'
+      - 'macos/**'
+      - 'windows/**'
+      - 'pubspec.*'
+      - 'analysis_options.yaml'
       - '.github/workflows/platforms.yml'
   workflow_dispatch:
 
@@ -17,11 +29,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: platforms-${{ github.ref }}
+  group: pocketssh-builds-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   FLUTTER_VERSION: '3.35.7'
+  JAVA_VERSION: '17'
 
 jobs:
   verify:
@@ -37,8 +50,51 @@ jobs:
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub
 
+  android:
+    name: Build Android APK
+    needs: verify
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: flutter-${{ env.FLUTTER_VERSION }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build ARM64 debug APK
+        run: flutter build apk --debug --target-platform android-arm64
+
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-debug.apk PocketSSH-debug-arm64.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-ssh-debug-arm64
+          path: PocketSSH-debug-arm64.apk
+          if-no-files-found: error
+          retention-days: 14
+
   ios:
     needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: macos-15
     timeout-minutes: 35
     steps:
@@ -67,6 +123,7 @@ jobs:
 
   macos:
     needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: macos-15
     timeout-minutes: 35
     steps:
@@ -95,6 +152,7 @@ jobs:
 
   windows:
     needs: verify
+    if: github.event_name != 'pull_request'
     runs-on: windows-2022
     timeout-minutes: 35
     steps:
@@ -119,3 +177,113 @@ jobs:
           name: PocketSSH-Windows-x64
           path: dist/PocketSSH-Windows-x64.zip
           if-no-files-found: error
+
+  release:
+    name: Publish four-platform release
+    needs: [android, ios, macos, windows]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+          cache-key: flutter-${{ env.FLUTTER_VERSION }}
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Provision signing keystore
+        if: vars.SIGN_ANDROID_RELEASE == 'true'
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/pocket-ssh-release.jks"
+          chmod 600 "$RUNNER_TEMP/pocket-ssh-release.jks"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
+      - name: Build signed release APK
+        if: vars.SIGN_ANDROID_RELEASE == 'true'
+        run: |
+          flutter build apk --release --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk dist/PocketSSH-release-arm64.apk
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/pocket-ssh-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - name: Verify release assets and calculate checksums
+        run: |
+          cd dist
+          test -f PocketSSH-debug-arm64.apk
+          test -f PocketSSH-iOS.ipa
+          test -f PocketSSH-macOS.zip
+          test -f PocketSSH-Windows-x64.zip
+          sha256sum -- * > SHA256SUMS.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*
+
+  summary:
+    name: Build summary
+    if: always()
+    needs: [verify, android, ios, macos, windows, release]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Download platform artifacts for checksums
+        if: github.event_name != 'pull_request' && (needs.android.result == 'success' || needs.ios.result == 'success' || needs.macos.result == 'success' || needs.windows.result == 'success')
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+      - name: Calculate checksums
+        if: github.event_name != 'pull_request' && (needs.android.result == 'success' || needs.ios.result == 'success' || needs.macos.result == 'success' || needs.windows.result == 'success')
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request' && (needs.android.result == 'success' || needs.ios.result == 'success' || needs.macos.result == 'success' || needs.windows.result == 'success')
+        with:
+          name: PocketSSH-checksums
+          path: dist/SHA256SUMS.txt
+          if-no-files-found: error
+      - name: Report build and release results
+        if: always()
+        run: |
+          {
+            echo '## PocketSSH builds'
+            echo '| Job | Result | Artifact name |'
+            echo '| --- | --- | --- |'
+            echo '| Analysis and tests | ${{ needs.verify.result }} | |'
+            echo '| Android ARM64 | ${{ needs.android.result }} | pocket-ssh-debug-arm64 |'
+            echo '| iOS | ${{ needs.ios.result }} | PocketSSH-iOS |'
+            echo '| macOS | ${{ needs.macos.result }} | PocketSSH-macOS |'
+            echo '| Windows x64 | ${{ needs.windows.result }} | PocketSSH-Windows-x64 |'
+            echo '| GitHub Release | ${{ needs.release.result }} | GitHub Releases |'
+          } >> "$GITHUB_STEP_SUMMARY"

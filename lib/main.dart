@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'core/ai_endpoint.dart';
 import 'core/app_store.dart';
 import 'core/host_trust.dart';
+import 'core/host_backup.dart';
 import 'core/device_bridge.dart';
 import 'core/sessions.dart';
 import 'core/ssh_connection.dart';
@@ -369,31 +370,115 @@ class _PocketHomeState extends State<PocketHome> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: IndexedStack(
-        index: tab,
-        children: [
-          hostsPage(),
-          transfersPage(),
-          SettingsPage(store: widget.store),
-        ],
-      ),
-    ),
-    bottomNavigationBar: NavigationBar(
-      selectedIndex: tab,
-      onDestinationSelected: (index) => setState(() => tab = index),
-      destinations: const [
-        NavigationDestination(
-          icon: Icon(Icons.dns_outlined),
-          selectedIcon: Icon(Icons.dns),
-          label: '主机',
-        ),
-        NavigationDestination(icon: Icon(Icons.swap_vert), label: '传输'),
-        NavigationDestination(icon: Icon(Icons.tune), label: '设置'),
+  Widget build(BuildContext context) {
+    final wide = MediaQuery.sizeOf(context).width >= 900;
+    final page = IndexedStack(
+      index: tab,
+      children: [
+        hostsPage(),
+        transfersPage(),
+        SettingsPage(store: widget.store),
       ],
-    ),
-  );
+    );
+    return Scaffold(
+      body: SafeArea(
+        child: wide
+            ? Row(
+                children: [
+                  NavigationRail(
+                    extended: true,
+                    selectedIndex: tab,
+                    onDestinationSelected: (index) =>
+                        setState(() => tab = index),
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.dns_outlined),
+                        label: Text('主机'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.swap_vert),
+                        label: Text('传输'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.tune),
+                        label: Text('设置'),
+                      ),
+                    ],
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: page),
+                ],
+              )
+            : page,
+      ),
+      bottomNavigationBar: wide
+          ? null
+          : NavigationBar(
+              selectedIndex: tab,
+              onDestinationSelected: (index) => setState(() => tab = index),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.dns_outlined),
+                  selectedIcon: Icon(Icons.dns),
+                  label: '主机',
+                ),
+                NavigationDestination(icon: Icon(Icons.swap_vert), label: '传输'),
+                NavigationDestination(icon: Icon(Icons.tune), label: '设置'),
+              ],
+            ),
+    );
+  }
+
+  Future<void> transferProfiles(String action) async {
+    try {
+      if (action == 'export') {
+        await Clipboard.setData(
+          ClipboardData(text: exportHosts(widget.store.hosts)),
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('主机配置已复制，不含凭据和指纹')));
+        }
+        return;
+      }
+      final input = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+      if (!mounted || input == null) return;
+      final profiles = importHosts(input);
+      if (profiles.isEmpty) return;
+      final accepted = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('导入主机配置'),
+          content: Text('从剪贴板添加 ${profiles.length} 个主机，不覆盖已有配置。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('导入'),
+            ),
+          ],
+        ),
+      );
+      if (accepted != true || !mounted) return;
+      widget.store.hosts.addAll(profiles);
+      try {
+        await widget.store.save();
+      } catch (_) {
+        widget.store.hosts.removeWhere(profiles.contains);
+        rethrow;
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('无法处理主机配置，请检查剪贴板或存储权限')));
+      }
+    }
+  }
 
   Widget hostsPage() {
     final hosts =
@@ -435,6 +520,14 @@ class _PocketHomeState extends State<PocketHome> {
               onPressed: () => edit(),
               tooltip: '添加主机',
               icon: const Icon(Icons.add),
+            ),
+            PopupMenuButton<String>(
+              tooltip: '主机配置备份',
+              onSelected: transferProfiles,
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'export', child: Text('复制主机配置 JSON')),
+                PopupMenuItem(value: 'import', child: Text('从剪贴板导入配置')),
+              ],
             ),
           ],
         ),

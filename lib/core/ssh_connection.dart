@@ -31,6 +31,7 @@ class SshConnection {
   SSHSession? _shell;
   bool _closed = false;
   bool get isClosed => _closed;
+  Future<void> get done => _client!.done;
 
   Future<SSHSession?> open({
     required SshTarget target,
@@ -42,6 +43,7 @@ class SshConnection {
     String? passphrase,
     Future<SSHSocket> Function()? dial,
     bool interactive = true,
+    void Function(String)? onStage,
   }) async {
     List<SSHKeyPair>? identities;
     if (privateKey != null) {
@@ -66,6 +68,7 @@ class SshConnection {
       socket.destroy();
       throw StateError('Connection closed');
     }
+    onStage?.call('SSH 握手中');
     final client = _client = SSHClient(
       socket,
       username: target.username,
@@ -73,8 +76,14 @@ class SshConnection {
       onPasswordRequest: password == null
           ? null
           : () => _closed ? null : password,
-      onVerifyHostKey: (type, fingerprint) async =>
-          !_closed && await verify(type, utf8.decode(fingerprint)) && !_closed,
+      onVerifyHostKey: (type, fingerprint) async {
+        if (_closed) return false;
+        onStage?.call('正在核对主机指纹');
+        final accepted = await verify(type, utf8.decode(fingerprint));
+        if (!accepted || _closed) return false;
+        onStage?.call('正在认证');
+        return true;
+      },
       handshakeTimeout: const Duration(minutes: 2),
       authTimeout: const Duration(seconds: 25),
     );

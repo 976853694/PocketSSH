@@ -11,13 +11,24 @@ class Sessions extends ChangeNotifier {
   final items = <WorkspaceSession>[];
   void add(WorkspaceSession session) {
     items.add(session);
+    session.addListener(notifyListeners);
     notifyListeners();
   }
 
   void remove(WorkspaceSession session) {
-    items.remove(session);
+    if (!items.remove(session)) return;
+    session.removeListener(notifyListeners);
     session.stop();
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    for (final session in items) {
+      session.removeListener(notifyListeners);
+      session.stop();
+    }
+    super.dispose();
   }
 }
 
@@ -62,7 +73,8 @@ class WorkspaceSession extends ChangeNotifier {
     bool fileOnly = false,
   }) async {
     if (connected || opening) return;
-    if (finished) {
+    final reconnecting = finished;
+    if (reconnecting) {
       connection = SshConnection();
       _jump = SshConnection();
       _subscriptions.clear();
@@ -70,7 +82,10 @@ class WorkspaceSession extends ChangeNotifier {
       finished = false;
     }
     opening = true;
-    status = '正在连接';
+    status = reconnecting ? '正在重新连接' : '正在连接';
+    final currentConnection = connection;
+    final currentJump = _jump;
+    bool isCurrent() => !finished && identical(connection, currentConnection);
     notifyListeners();
     final target = SshTarget(profile.host, profile.port, profile.username);
     Future<SSHSession?> openOn(
@@ -92,6 +107,11 @@ class WorkspaceSession extends ChangeNotifier {
           passphrase: c.passphrase.isEmpty ? null : c.passphrase,
           dial: dial,
           interactive: shell,
+          onStage: (stage) {
+            if (!isCurrent()) return;
+            status = identical(conn, currentJump) ? '跳板机 · $stage' : stage;
+            notifyListeners();
+          },
         )
         .then((session) async {
           if (onAuthenticated != null && !conn.isClosed) {
@@ -110,7 +130,7 @@ class WorkspaceSession extends ChangeNotifier {
           onAuthenticated: onJumpAuthenticated,
         );
       }
-      if (finished) return;
+      if (!isCurrent()) return;
       final shell = await openOn(
         connection,
         target,
@@ -124,16 +144,27 @@ class WorkspaceSession extends ChangeNotifier {
         onAuthenticated: onAuthenticated,
         shell: !fileOnly,
       );
-      if (finished) return;
+      if (!isCurrent()) return;
       if (fileOnly) {
         opening = false;
         connected = true;
         status = '已连接';
         notifyListeners();
+        unawaited(
+          currentConnection.done.then<void>(
+            (_) {
+              if (isCurrent()) stop('SFTP 连接已断开');
+            },
+            onError: (Object error, StackTrace stack) {
+              if (isCurrent()) stop(connectionError(error));
+            },
+          ),
+        );
         return;
       }
       if (shell == null) throw StateError('未创建终端');
       _shell = shell;
+      if (reconnecting) terminal.write('\r\n—— 新 SSH 会话 ——\r\n');
       opening = false;
       connected = true;
       status = '已连接';
@@ -154,11 +185,14 @@ class WorkspaceSession extends ChangeNotifier {
       }
       notifyListeners();
       await shell.done;
+      if (!isCurrent()) return;
       await Future.wait(
         _drains.map((drain) => drain.future).toList(),
       ).timeout(const Duration(seconds: 2));
+      if (!isCurrent()) return;
       stop('会话结束${shell.exitCode == null ? '' : ' · ${shell.exitCode}'}');
     } catch (error) {
+      if (!isCurrent()) return;
       opening = false;
       stop(connectionError(error));
     }

@@ -38,6 +38,8 @@ class _TerminalPageState extends State<TerminalPage> {
   final searchField = TextEditingController();
   WorkspaceSession get session => widget.session;
   String draft = '';
+  bool _aiDraft = false;
+  bool _confirmingDraft = false;
   bool search = false;
   List<TerminalSearchMatch> matches = [];
   int match = 0;
@@ -49,12 +51,20 @@ class _TerminalPageState extends State<TerminalPage> {
   void initState() {
     super.initState();
     session.addListener(update);
-    draftController.addListener(() => draft = draftController.text);
-    if (widget.directCredentials != null) {
-      unawaited(_open(widget.directCredentials!, widget.directJumpCredentials));
-    } else if (!session.connected) {
-      unawaited(_connectAgain());
-    }
+    draftController.addListener(() {
+      final value = draftController.text;
+      if (draft != value) setState(() => draft = value);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || session.connected || session.opening) return;
+      if (widget.directCredentials != null) {
+        unawaited(
+          _open(widget.directCredentials!, widget.directJumpCredentials),
+        );
+      } else if (!session.finished) {
+        unawaited(_connectAgain());
+      }
+    });
   }
 
   void update() {
@@ -213,7 +223,11 @@ class _TerminalPageState extends State<TerminalPage> {
       builder: (_) => AiPanel(
         store: widget.store,
         selection: contextText,
+        onReview: session.connected
+            ? (value) => unawaited(_reviewAiCommand(value))
+            : null,
         onDraft: (value) {
+          _aiDraft = true;
           draftController.text = value;
           _notice('AI 建议已放入命令草稿；检查后手动发送。');
         },
@@ -413,6 +427,32 @@ class _TerminalPageState extends State<TerminalPage> {
                   : Theme.of(context).colorScheme.primary,
             ),
           ),
+          if (widget.sessions.items.length > 1)
+            PopupMenuButton<WorkspaceSession>(
+              tooltip: '切换 SSH 会话',
+              icon: const Icon(Icons.tab),
+              onSelected: (target) {
+                if (identical(target, session)) return;
+                Navigator.of(context).pushReplacement<void, void>(
+                  MaterialPageRoute(
+                    builder: (_) => TerminalPage(
+                      session: target,
+                      store: widget.store,
+                      sessions: widget.sessions,
+                      verify: widget.verify,
+                    ),
+                  ),
+                );
+              },
+              itemBuilder: (_) => [
+                for (final target in widget.sessions.items)
+                  PopupMenuItem(
+                    value: target,
+                    enabled: !identical(target, session),
+                    child: Text('${target.profile.name} · ${target.status}'),
+                  ),
+              ],
+            ),
           PopupMenuButton<String>(
             onSelected: (value) {
               if (value == 'search') setState(() => search = !search);
@@ -543,7 +583,10 @@ class _TerminalPageState extends State<TerminalPage> {
                         hintText: '命令草稿 · 检查后发送',
                         isDense: true,
                         suffixIcon: IconButton(
-                          onPressed: () => draftController.clear(),
+                          onPressed: () {
+                            _aiDraft = false;
+                            draftController.clear();
+                          },
                           icon: const Icon(Icons.close),
                         ),
                       ),
@@ -601,8 +644,135 @@ class _TerminalPageState extends State<TerminalPage> {
     );
   }
 
-  void _sendDraft(String value) {
-    if (!session.connected || value.trim().isEmpty) return;
+  Future<void> _reviewAiCommand(String suggestion) async {
+    if (_confirmingDraft || !session.connected) return;
+    final connection = session.connection;
+    final profile = session.profile;
+    final target = SshTarget(
+      profile.host,
+      profile.port,
+      profile.username,
+    ).label;
+    var command = suggestion;
+    _confirmingDraft = true;
+    try {
+      final approved = await showDialog<String>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: const Text('审阅并执行'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('目标会话 · $target'),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    initialValue: suggestion,
+                    minLines: 1,
+                    maxLines: 8,
+                    autocorrect: false,
+                    style: const TextStyle(fontFamily: 'monospace'),
+                    decoration: const InputDecoration(labelText: '完整命令'),
+                    onChanged: (value) => update(() => command = value),
+                  ),
+                  if (isHighRiskCommand(command) ||
+                      command.contains('\n') ||
+                      command.contains('\r'))
+                    const Text('高风险操作或多行命令，请核对每一行及其影响。'),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: command.trim().isEmpty
+                    ? null
+                    : () => Navigator.pop(context, command),
+                child: const Text('执行'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (!mounted ||
+          approved == null ||
+          !session.connected ||
+          !identical(connection, session.connection)) {
+        return;
+      }
+      _writeConfirmedCommand(approved);
+      _notice('命令已发送，执行结果请查看当前终端。');
+    } finally {
+      _confirmingDraft = false;
+    }
+  }
+
+  Future<void> _sendDraft(String value) async {
+    if (_confirmingDraft || !session.connected || value.trim().isEmpty) return;
+    final fromAssistant = _aiDraft;
+    final highRisk = isHighRiskCommand(value);
+    if (fromAssistant ||
+        highRisk ||
+        value.contains('\n') ||
+        value.contains('\r')) {
+      final connection = session.connection;
+      final target = session.profile;
+      final targetLabel = SshTarget(
+        target.host,
+        target.port,
+        target.username,
+      ).label;
+      _confirmingDraft = true;
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(highRisk ? '确认高风险命令' : '确认执行命令'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('目标会话 · $targetLabel'),
+                const SizedBox(height: 12),
+                SelectableText(
+                  value,
+                  style: const TextStyle(fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('执行'),
+            ),
+          ],
+        ),
+      );
+      _confirmingDraft = false;
+      if (!mounted ||
+          approved != true ||
+          !session.connected ||
+          !identical(connection, session.connection) ||
+          draftController.text != value) {
+        return;
+      }
+    }
+    _writeConfirmedCommand(value);
+    _aiDraft = false;
+    draftController.clear();
+  }
+
+  void _writeConfirmedCommand(String value) {
     if (widget.store.recentCommandHistory &&
         !widget.store.recentCommands.contains(value)) {
       widget.store.recentCommands.insert(0, value);
@@ -611,8 +781,8 @@ class _TerminalPageState extends State<TerminalPage> {
       }
       unawaited(widget.store.save());
     }
-    session.terminal.paste('$value\n');
-    draftController.clear();
+    session.terminal.paste(value);
+    session.terminal.keyInput(TerminalKey.enter);
   }
 
   Widget _shortcut(String label, TerminalKey key, bool ctrl) => TextButton(

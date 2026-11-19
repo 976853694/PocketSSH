@@ -11,10 +11,12 @@ class AiPanel extends StatefulWidget {
     required this.store,
     required this.selection,
     required this.onDraft,
+    this.onReview,
   });
   final AppStore store;
   final String selection;
   final ValueChanged<String> onDraft;
+  final ValueChanged<String>? onReview;
   @override
   State<AiPanel> createState() => _AiPanelState();
 }
@@ -222,6 +224,14 @@ class _AiPanelState extends State<AiPanel> {
                       Navigator.pop(context);
                     },
                     child: const Text('放入命令草稿'),
+                  ),
+                if (client == null &&
+                    command != null &&
+                    command.isNotEmpty &&
+                    widget.onReview != null)
+                  OutlinedButton(
+                    onPressed: () => widget.onReview!(command),
+                    child: const Text('审阅并执行'),
                   ),
               ],
             ),
