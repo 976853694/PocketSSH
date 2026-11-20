@@ -93,9 +93,11 @@ class AppStore extends ChangeNotifier {
   final List<String> recentCommands = [];
   String theme = 'system',
       terminalTheme = 'dark',
+      glassStyle = 'liquid',
       aiEndpoint = '',
       aiModel = '',
       aiChannelName = '';
+  double glassOpacity = .72;
   String get aiChannelLabel => aiChannelName.trim().isNotEmpty
       ? aiChannelName.trim()
       : aiBaseUrl(aiEndpoint)?.host ?? 'AI 服务';
@@ -128,6 +130,14 @@ class AppStore extends ChangeNotifier {
         );
         theme = j['theme'] as String? ?? 'system';
         terminalTheme = j['terminalTheme'] as String? ?? 'dark';
+        final style = j['glassStyle'] as String? ?? 'liquid';
+        glassStyle = {'liquid', 'frosted', 'solid'}.contains(style)
+            ? style
+            : 'liquid';
+        glassOpacity = ((j['glassOpacity'] as num?)?.toDouble() ?? .72).clamp(
+          .35,
+          .9,
+        );
         aiEndpoint = j['aiEndpoint'] as String? ?? '';
         aiModel = j['aiModel'] as String? ?? '';
         aiChannelName = j['aiChannelName'] as String? ?? '';
@@ -164,6 +174,8 @@ class AppStore extends ChangeNotifier {
         'recentCommands': recentCommands,
         'theme': theme,
         'terminalTheme': terminalTheme,
+        'glassStyle': glassStyle,
+        'glassOpacity': glassOpacity,
         'fontSize': fontSize,
         'scrollback': scrollback,
         'keepAwake': keepAwake,

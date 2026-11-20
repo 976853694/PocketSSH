@@ -29,7 +29,9 @@ Future<void> _reveal(WidgetTester tester, Finder finder) async {
 Future<void> _showHeaders(WidgetTester tester, _SettingsStore store) async {
   await tester.pumpWidget(
     MaterialApp(
-      home: Scaffold(body: SettingsPage(store: store)),
+      home: Scaffold(
+        body: SettingsPage(store: store, section: 'ai'),
+      ),
     ),
   );
   final vertical = find
@@ -118,7 +120,9 @@ void main() {
           ..failSave = failSave;
         await tester.pumpWidget(
           MaterialApp(
-            home: Scaffold(body: SettingsPage(store: store)),
+            home: Scaffold(
+              body: SettingsPage(store: store, section: 'ai'),
+            ),
           ),
         );
         final vertical = find

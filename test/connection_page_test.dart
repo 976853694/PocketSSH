@@ -16,69 +16,51 @@ void main() {
     expect(normalizeHost('server.example:22'), isNull);
   });
 
-  testWidgets('home exposes host, transfer and settings navigation', (
-    tester,
-  ) async {
-    final store = AppStore();
-    final sessions = Sessions();
-    await tester.pumpWidget(
-      MaterialApp(
-        home: PocketHome(store: store, sessions: sessions),
-      ),
-    );
-    expect(find.text('Pocket SSH'), findsOneWidget);
-    expect(find.text('主机'), findsOneWidget);
-    expect(find.text('传输'), findsOneWidget);
-    expect(find.text('设置'), findsOneWidget);
-    expect(find.text('添加第一台服务器'), findsOneWidget);
-    await tester.tap(find.text('设置'));
-    await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(
-      find.text('AI 终端'),
-      100,
-      scrollable: find
-          .byWidgetPredicate(
-            (widget) =>
-                widget is Scrollable &&
-                widget.axisDirection == AxisDirection.down,
-          )
-          .last,
-    );
-    expect(find.text('AI 终端'), findsOneWidget);
-    final vertical = find
-        .byWidgetPredicate(
-          (widget) =>
-              widget is Scrollable &&
-              widget.axisDirection == AxisDirection.down,
-        )
-        .last;
-    await tester.scrollUntilVisible(
-      find.text('接口类型'),
-      150,
-      scrollable: vertical,
-    );
-    await tester.ensureVisible(find.text('Chat'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Chat'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Responses').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Responses'), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('终端字体大小'),
-      -200,
-      scrollable: find
-          .byWidgetPredicate(
-            (widget) =>
-                widget is Scrollable &&
-                widget.axisDirection == AxisDirection.down,
-          )
-          .last,
-    );
-    expect(find.text('终端字体大小'), findsOneWidget);
-    sessions.dispose();
-    store.dispose();
-  });
+  testWidgets(
+    'home exposes host, session and file navigation with settings categories',
+    (tester) async {
+      final store = AppStore();
+      final sessions = Sessions();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PocketHome(store: store, sessions: sessions),
+        ),
+      );
+      expect(find.text('Pocket SSH'), findsOneWidget);
+      expect(find.text('主机'), findsOneWidget);
+      expect(find.text('会话'), findsOneWidget);
+      expect(find.text('文件'), findsOneWidget);
+      expect(find.text('添加第一台服务器'), findsOneWidget);
+      await tester.tap(find.text('文件'));
+      await tester.pumpAndSettle();
+      expect(find.text('SFTP 传输'), findsNothing);
+      await tester.tap(find.text('主机'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('设置'));
+      await tester.pumpAndSettle();
+      expect(find.text('外观'), findsOneWidget);
+      expect(find.text('终端'), findsOneWidget);
+      expect(find.text('AI 助手'), findsOneWidget);
+      expect(find.text('安全与隐私'), findsOneWidget);
+      await tester.tap(find.text('外观'));
+      await tester.pumpAndSettle();
+      expect(find.text('液态'), findsOneWidget);
+      expect(find.text('毛玻璃'), findsOneWidget);
+      expect(find.text('透明度 72%'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('AI 助手'));
+      await tester.pumpAndSettle();
+      expect(find.text('接口类型'), findsOneWidget);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('终端'));
+      await tester.pumpAndSettle();
+      expect(find.text('字体大小 · 14 px'), findsOneWidget);
+      sessions.dispose();
+      store.dispose();
+    },
+  );
 
   testWidgets('host profile form exposes connection and jump-host fields', (
     tester,

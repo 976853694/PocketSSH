@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import '../../core/sessions.dart';
 import '../../core/ssh_connection.dart';
 import '../connection/connection_page.dart';
 import 'ai_panel.dart';
+import '../settings/glass_surface.dart';
 import 'sftp_page.dart';
 
 class TerminalPage extends StatefulWidget {
@@ -224,10 +226,16 @@ class _TerminalPageState extends State<TerminalPage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => AiAgentPanel(
+      backgroundColor: Colors.transparent,
+      clipBehavior: Clip.antiAlias,
+      builder: (_) => GlassSurface(
         store: widget.store,
-        session: session,
-        selection: contextText,
+        radius: 28,
+        child: AiAgentPanel(
+          store: widget.store,
+          session: session,
+          selection: contextText,
+        ),
       ),
     );
   }
@@ -468,6 +476,18 @@ class _TerminalPageState extends State<TerminalPage> {
 
     return Scaffold(
       appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.surface.withValues(
+          alpha: widget.store.glassStyle == 'solid'
+              ? 1
+              : widget.store.glassOpacity.clamp(.35, .9),
+        ),
+        surfaceTintColor: Colors.transparent,
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+            child: const SizedBox.expand(),
+          ),
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -501,16 +521,6 @@ class _TerminalPageState extends State<TerminalPage> {
             onPressed: () => _openAi(),
             icon: const Icon(Icons.auto_awesome_outlined),
           ),
-          IconButton(
-            tooltip: '本地端口转发',
-            onPressed: session.connected ? _tunnels : null,
-            icon: Icon(
-              Icons.lan_outlined,
-              color: session.forwards.isEmpty
-                  ? null
-                  : Theme.of(context).colorScheme.primary,
-            ),
-          ),
           if (widget.sessions.items.length > 1)
             PopupMenuButton<WorkspaceSession>(
               tooltip: '切换 SSH 会话',
@@ -538,6 +548,8 @@ class _TerminalPageState extends State<TerminalPage> {
               ],
             ),
           PopupMenuButton<String>(
+            tooltip: '终端工具',
+            icon: const Icon(Icons.more_vert),
             onSelected: (value) {
               if (value == 'search') setState(() => search = !search);
               if (value == 'theme') {
@@ -550,26 +562,30 @@ class _TerminalPageState extends State<TerminalPage> {
               if (value == 'snippets') _showSnippets();
               if (value == 'save') _saveDraft();
               if (value == 'clear') session.terminal.clear();
+              if (value == 'tunnels') {
+                if (session.forwarding) {
+                  session.stopForwards();
+                } else {
+                  _tunnels();
+                }
+              }
+              if (value == 'disconnect') session.stop();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'search', child: Text('搜索输出')),
-              PopupMenuItem(value: 'copy', child: Text('复制选中内容')),
-              PopupMenuItem(value: 'snippets', child: Text('命令收藏')),
-              PopupMenuItem(value: 'save', child: Text('收藏当前草稿')),
-              PopupMenuItem(value: 'theme', child: Text('切换终端主题')),
-              PopupMenuItem(value: 'font', child: Text('调整字体大小')),
-              PopupMenuItem(value: 'clear', child: Text('清空终端')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(value: 'search', child: Text('搜索输出')),
+              const PopupMenuItem(value: 'copy', child: Text('复制选中内容')),
+              const PopupMenuItem(value: 'snippets', child: Text('命令收藏')),
+              const PopupMenuItem(value: 'save', child: Text('收藏当前草稿')),
+              const PopupMenuItem(value: 'theme', child: Text('切换终端主题')),
+              const PopupMenuItem(value: 'font', child: Text('调整字体大小')),
+              const PopupMenuItem(value: 'clear', child: Text('清空终端')),
+              PopupMenuItem(
+                value: 'tunnels',
+                enabled: session.connected || session.forwarding,
+                child: Text(session.forwarding ? '停止端口转发' : '本地端口转发'),
+              ),
+              const PopupMenuItem(value: 'disconnect', child: Text('断开连接')),
             ],
-          ),
-          IconButton(
-            tooltip: '停止端口转发',
-            onPressed: session.forwarding ? session.stopForwards : null,
-            icon: const Icon(Icons.stop_circle_outlined),
-          ),
-          IconButton(
-            tooltip: '断开连接',
-            onPressed: () => session.stop(),
-            icon: const Icon(Icons.link_off),
           ),
         ],
       ),
@@ -635,31 +651,38 @@ class _TerminalPageState extends State<TerminalPage> {
               ),
             ),
           if (session.connected)
-            SizedBox(
-              height: 48,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                children: [
-                  IconButton(
-                    tooltip: '打开键盘',
-                    onPressed: () => view.currentState?.requestKeyboard(),
-                    icon: const Icon(Icons.keyboard_outlined),
-                  ),
-                  for (final shortcut in _terminalKeys)
-                    _shortcut(shortcut.$1, shortcut.$2, shortcut.$3),
-                  if (widget.store.recentCommandHistory &&
-                      widget.store.recentCommands.isNotEmpty)
-                    TextButton.icon(
-                      onPressed: _showRecentCommands,
-                      icon: const Icon(Icons.history),
-                      label: const Text('最近命令'),
+            GlassSurface(
+              store: widget.store,
+              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: SizedBox(
+                height: 48,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: [
+                    IconButton(
+                      tooltip: '打开键盘',
+                      onPressed: () => view.currentState?.requestKeyboard(),
+                      icon: const Icon(Icons.keyboard_outlined),
                     ),
-                ],
+                    for (final shortcut in _terminalKeys)
+                      _shortcut(shortcut.$1, shortcut.$2, shortcut.$3),
+                    if (widget.store.recentCommandHistory &&
+                        widget.store.recentCommands.isNotEmpty)
+                      TextButton.icon(
+                        onPressed: _showRecentCommands,
+                        icon: const Icon(Icons.history),
+                        label: const Text('最近命令'),
+                      ),
+                  ],
+                ),
               ),
             ),
           if (session.connected)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+            GlassSurface(
+              store: widget.store,
+              margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              radius: 18,
               child: Row(
                 children: [
                   Expanded(
@@ -672,6 +695,10 @@ class _TerminalPageState extends State<TerminalPage> {
                       decoration: InputDecoration(
                         hintText: '命令草稿 · 检查后发送',
                         isDense: true,
+                        filled: false,
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
                         suffixIcon: IconButton(
                           onPressed: () {
                             draftController.clear();

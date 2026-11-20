@@ -157,6 +157,8 @@ void main() {
         ..snippets.add('ls -la')
         ..recentCommands.add('pwd')
         ..terminalTheme = 'light'
+        ..glassStyle = 'frosted'
+        ..glassOpacity = .58
         ..fontSize = 18;
       await first.save();
       final second = AppStore(channel: channel);
@@ -168,6 +170,8 @@ void main() {
       expect(second.recentCommands, ['pwd']);
       expect(second.recentCommandHistory, isTrue);
       expect(second.terminalTheme, 'light');
+      expect(second.glassStyle, 'frosted');
+      expect(second.glassOpacity, .58);
       expect(second.fontSize, 18);
     },
   );
