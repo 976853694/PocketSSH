@@ -107,11 +107,17 @@ class SshConnection {
     }
   }
 
-  Future<SSHSession> executeDiagnostic(String check) {
-    final command = diagnosticCommands[check];
+  Future<SSHSession> executeDiagnostic(AgentToolRequest request) {
     if (_closed || _client == null) throw StateError('SSH 会话已断开');
-    if (command == null) throw const FormatException('诊断项目不受支持');
-    return _client!.execute(command, environment: const {'TERM': 'dumb'});
+    return _client!.execute(
+      request.command,
+      environment: const {
+        'TERM': 'dumb',
+        'SYSTEMD_PAGER': '',
+        'SYSTEMD_COLORS': '0',
+        'LC_ALL': 'C',
+      },
+    );
   }
 
   Future<SftpClient> sftp() => _client!.sftp();

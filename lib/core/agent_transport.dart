@@ -10,10 +10,12 @@ class AgentTransport {
     required this.endpoint,
     required this.model,
     required this.apiKey,
+    required this.tools,
   });
   final Uri endpoint;
   final String model;
   final String? apiKey;
+  final List<Map<String, Object>> tools;
 
   Future<AgentReply> request(
     List<Map<String, Object?>> messages,
@@ -38,7 +40,7 @@ class AgentTransport {
         jsonEncode({
           'model': model,
           'stream': true,
-          'tools': agentTools,
+          'tools': tools,
           'tool_choice': 'auto',
           'messages': messages,
         }),
@@ -86,6 +88,7 @@ class AgentTransport {
         eventLines.add(value);
       }
       if (!parser.done) dispatch();
+      cancellation.check();
       return parser.complete();
     } finally {
       timer.cancel();
