@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/ai_endpoint.dart';
+import 'core/app_palette.dart';
 import 'core/ai_headers.dart';
 import 'core/agent_context.dart';
 import 'core/app_store.dart';
@@ -78,13 +79,8 @@ class _PocketSshAppState extends State<PocketSshApp> {
   );
 
   ThemeData _theme(Brightness brightness) {
-    final colors = ColorScheme.fromSeed(
-      seedColor: const Color(0xff16b995),
-      brightness: brightness,
-      surface: brightness == Brightness.dark
-          ? const Color(0xff10171d)
-          : const Color(0xfff4f7f8),
-    );
+    final dark = brightness == Brightness.dark;
+    final colors = AppPalette.scheme(brightness);
     final fieldBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
       borderSide: BorderSide(color: colors.outlineVariant),
@@ -102,11 +98,17 @@ class _PocketSshAppState extends State<PocketSshApp> {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: colors.surfaceContainerHighest.withValues(alpha: .45),
+        fillColor: colors.surfaceContainerHighest.withValues(
+          alpha: dark ? .48 : .62,
+        ),
         border: fieldBorder,
         enabledBorder: fieldBorder,
         focusedBorder: fieldBorder.copyWith(
           borderSide: BorderSide(color: colors.primary, width: 1.5),
+        ),
+        labelStyle: TextStyle(color: colors.onSurfaceVariant),
+        hintStyle: TextStyle(
+          color: colors.onSurfaceVariant.withValues(alpha: .8),
         ),
       ),
       cardTheme: CardThemeData(
@@ -114,13 +116,26 @@ class _PocketSshAppState extends State<PocketSshApp> {
         color: colors.surfaceContainerLow,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: colors.outlineVariant.withValues(alpha: .6)),
+          side: BorderSide(color: colors.outlineVariant.withValues(alpha: .75)),
         ),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: colors.surface,
         elevation: 0,
         indicatorColor: colors.primaryContainer,
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(color: colors.onSurfaceVariant),
+        ),
+      ),
+      dividerTheme: DividerThemeData(
+        color: colors.outlineVariant,
+        thickness: 1,
+        space: 1,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: colors.inverseSurface,
+        contentTextStyle: TextStyle(color: colors.onInverseSurface),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -1891,7 +1906,11 @@ class _WorkspaceHero extends StatelessWidget {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [Color(0xff142a31), Color(0xff174e4a), Color(0xff0d7669)],
+            colors: [
+              AppPalette.heroTop,
+              AppPalette.heroMiddle,
+              AppPalette.heroBottom,
+            ],
           ),
           boxShadow: [
             BoxShadow(
@@ -1927,7 +1946,7 @@ class _WorkspaceHero extends StatelessWidget {
                       const Icon(
                         Icons.shield_outlined,
                         size: 16,
-                        color: Color(0xffa5f1dd),
+                        color: AppPalette.heroHighlight,
                       ),
                       const SizedBox(width: 7),
                       Expanded(
@@ -1937,7 +1956,7 @@ class _WorkspaceHero extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(
-                                color: const Color(0xffbcece0),
+                                color: AppPalette.heroText,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: 1.1,
                               ),
@@ -1983,8 +2002,8 @@ class _WorkspaceHero extends StatelessWidget {
                     children: [
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xffe3fff5),
-                          foregroundColor: const Color(0xff103b35),
+                          backgroundColor: AppPalette.heroButton,
+                          foregroundColor: AppPalette.heroButtonText,
                         ),
                         onPressed: onQuickConnect,
                         icon: const Icon(Icons.bolt_rounded),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm2/xterm.dart';
+import '../../core/app_palette.dart';
 import '../../core/app_store.dart';
 import '../../core/sessions.dart';
 import '../../core/ssh_connection.dart';
@@ -446,31 +447,39 @@ class _TerminalPageState extends State<TerminalPage> {
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final dark = widget.store.terminalTheme == 'dark';
-    final foreground = dark ? const Color(0xffd9e2e5) : const Color(0xff182127);
-    final background = dark ? const Color(0xff10181c) : const Color(0xfff5f8f7);
+    final foreground = dark
+        ? AppPalette.terminalDarkForeground
+        : AppPalette.terminalLightForeground;
+    final background = dark
+        ? AppPalette.terminalDarkBackground
+        : AppPalette.terminalLightBackground;
     final theme = TerminalTheme(
       cursor: colors.primary,
-      selection: colors.primary.withValues(alpha: .4),
+      selection: AppPalette.terminalSelection.withValues(alpha: .4),
       foreground: foreground,
       background: background,
-      black: dark ? Colors.black : const Color(0xff182127),
-      white: dark ? const Color(0xffe7eeef) : Colors.white,
-      red: const Color(0xffe15c65),
-      green: const Color(0xff60c99f),
-      yellow: const Color(0xffedc875),
-      blue: const Color(0xff66a9e4),
-      magenta: const Color(0xffc792ea),
-      cyan: const Color(0xff61c7cb),
-      brightBlack: const Color(0xff73838a),
-      brightRed: const Color(0xffff7280),
-      brightGreen: const Color(0xff8ce1b8),
-      brightYellow: const Color(0xffffdb91),
-      brightBlue: const Color(0xff82bcff),
-      brightMagenta: const Color(0xffd8a5ff),
-      brightCyan: const Color(0xff84e4e3),
-      brightWhite: dark ? Colors.white : const Color(0xff111a20),
-      searchHitBackground: const Color(0xffffe36e),
-      searchHitBackgroundCurrent: const Color(0xff36d789),
+      black: dark
+          ? AppPalette.terminalDarkBlack
+          : AppPalette.terminalLightBlack,
+      white: dark ? AppPalette.terminalDarkForeground : Colors.white,
+      red: AppPalette.terminalRed,
+      green: AppPalette.terminalGreen,
+      yellow: AppPalette.terminalYellow,
+      blue: AppPalette.terminalBlue,
+      magenta: AppPalette.terminalMagenta,
+      cyan: AppPalette.terminalCyan,
+      brightBlack: AppPalette.terminalBrightBlack,
+      brightRed: AppPalette.terminalBrightRed,
+      brightGreen: AppPalette.terminalBrightGreen,
+      brightYellow: AppPalette.terminalBrightYellow,
+      brightBlue: AppPalette.terminalBrightBlue,
+      brightMagenta: AppPalette.terminalBrightMagenta,
+      brightCyan: AppPalette.terminalBrightCyan,
+      brightWhite: dark
+          ? AppPalette.terminalDarkWhite
+          : AppPalette.terminalLightWhite,
+      searchHitBackground: AppPalette.terminalSearch,
+      searchHitBackgroundCurrent: AppPalette.terminalSearchCurrent,
       searchHitForeground: Colors.black,
     );
 
