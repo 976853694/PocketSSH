@@ -6,6 +6,14 @@ import 'package:pocket_ssh/main.dart';
 class _SettingsStore extends AppStore {
   bool failSave = false;
   String? savedName;
+  Map<String, String> headers = {};
+  @override
+  Future<Map<String, String>> aiHeaders(String input) async => Map.of(headers);
+  @override
+  Future<void> putAiHeaders(String input, Map<String, String> values) async {
+    headers = Map.of(values);
+  }
+
   @override
   Future<void> save() async {
     if (failSave) throw StateError('storage unavailable');
@@ -13,7 +21,92 @@ class _SettingsStore extends AppStore {
   }
 }
 
+Future<void> _reveal(WidgetTester tester, Finder finder) async {
+  await Scrollable.ensureVisible(tester.element(finder), alignment: .5);
+  await tester.pumpAndSettle();
+}
+
+Future<void> _showHeaders(WidgetTester tester, _SettingsStore store) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(body: SettingsPage(store: store)),
+    ),
+  );
+  final vertical = find
+      .byWidgetPredicate(
+        (widget) =>
+            widget is Scrollable && widget.axisDirection == AxisDirection.down,
+      )
+      .last;
+  await tester.scrollUntilVisible(
+    find.text('自定义请求头'),
+    250,
+    scrollable: vertical,
+  );
+  await _reveal(tester, find.text('自定义请求头'));
+  await tester.tap(find.text('自定义请求头'));
+  await tester.pumpAndSettle();
+}
+
+Future<void> _saveHeadersForm(WidgetTester tester) async {
+  FocusManager.instance.primaryFocus?.unfocus();
+  tester.testTextInput.hide();
+  await tester.pumpAndSettle();
+  await _reveal(tester, find.text('加密保存 AI 设置'));
+  await tester.tap(find.text('加密保存 AI 设置'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  for (final failSave in [false, true]) {
+    testWidgets(
+      'custom headers ${failSave ? 'restore old encrypted values after failed save' : 'can be edited with values hidden by default'}',
+      (tester) async {
+        final store = _SettingsStore()
+          ..aiEndpoint = 'http://models.example.test'
+          ..aiModel = 'fixture-model'
+          ..headers = {'X-Channel': 'old-fixture-value'}
+          ..failSave = failSave;
+        await _showHeaders(tester, store);
+        final value = find.widgetWithText(TextField, '请求头值');
+        expect(tester.widget<TextField>(value).obscureText, isTrue);
+        await _reveal(tester, value);
+        await tester.enterText(value, 'new-fixture-value');
+        await _saveHeadersForm(tester);
+        expect(store.headers, {
+          'X-Channel': failSave ? 'old-fixture-value' : 'new-fixture-value',
+        });
+        await tester.pumpWidget(const SizedBox.shrink());
+        store.dispose();
+      },
+    );
+  }
+
+  testWidgets('headers can be added and explicitly removed', (tester) async {
+    final store = _SettingsStore()
+      ..aiEndpoint = 'http://models.example.test'
+      ..aiModel = 'fixture-model';
+    await _showHeaders(tester, store);
+    await _reveal(tester, find.text('添加请求头'));
+    await tester.tap(find.text('添加请求头'));
+    await tester.pumpAndSettle();
+    final name = find.widgetWithText(TextField, '请求头名称');
+    final value = find.widgetWithText(TextField, '请求头值');
+    await _reveal(tester, name);
+    await tester.enterText(name, 'X-Channel');
+    await _reveal(tester, value);
+    await tester.enterText(value, 'fixture-value');
+    await _saveHeadersForm(tester);
+    expect(store.headers, {'X-Channel': 'fixture-value'});
+    await _reveal(tester, find.byTooltip('删除请求头'));
+    await tester.tap(find.byTooltip('删除请求头'));
+    await tester.pumpAndSettle();
+    await _saveHeadersForm(tester);
+    expect(store.headers, isEmpty);
+    await tester.pumpWidget(const SizedBox.shrink());
+    store.dispose();
+  });
+
   for (final failSave in [false, true]) {
     testWidgets(
       'channel name ${failSave ? 'rolls back after a failed save' : 'is saved from the website settings form'}',
@@ -41,7 +134,7 @@ void main() {
           scrollable: vertical,
         );
         final field = find.widgetWithText(TextField, '渠道名称');
-        await tester.ensureVisible(field);
+        await _reveal(tester, field);
         await tester.enterText(field, '  新渠道  ');
         tester.testTextInput.hide();
         await tester.pumpAndSettle();
@@ -50,7 +143,7 @@ void main() {
           250,
           scrollable: vertical,
         );
-        await tester.ensureVisible(find.text('加密保存 AI 设置'));
+        await _reveal(tester, find.text('加密保存 AI 设置'));
         await tester.tap(find.text('加密保存 AI 设置'));
         await tester.pumpAndSettle();
         expect(store.aiChannelName, failSave ? '原渠道' : '新渠道');

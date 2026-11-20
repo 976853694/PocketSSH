@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../core/agent_controller.dart';
 import '../../core/agent_policy.dart';
@@ -34,6 +35,7 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
   AgentTransport? transport;
   AgentCancellation? preparing;
   String? localError, configuration;
+  Map<String, String> requestHeaders = const {};
   bool get current =>
       widget.session.connected &&
       identical(connection, widget.session.connection);
@@ -157,16 +159,26 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
       );
       if (!mounted) return;
       cancel.check();
+      final headers = await cancel.wait(
+        widget.store.aiHeaders(widget.store.aiEndpoint),
+      );
+      if (!mounted) return;
+      cancel.check();
       final selected =
           '$endpoint\n${widget.store.aiModel}\n${budget.contextTokens}\n${budget.maxOutputTokens}';
-      if (configuration != null && configuration != selected) agent.clear();
+      if (configuration != null &&
+          (configuration != selected || !mapEquals(requestHeaders, headers))) {
+        agent.clear();
+      }
       configuration = selected;
+      requestHeaders = Map.of(headers);
       transport = AgentTransport(
         endpoint: endpoint,
         model: widget.store.aiModel.trim(),
         apiKey: key,
         api: widget.store.aiApi,
         maxOutputTokens: budget.maxOutputTokens,
+        customHeaders: headers,
       );
       final supplied = contextText.text;
       question.clear();

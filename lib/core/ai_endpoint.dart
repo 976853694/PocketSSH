@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'ai_headers.dart';
 
 enum AiApi { chat, responses }
 
@@ -57,7 +58,9 @@ Future<List<String>> checkAiEndpoint(
   String? key, {
   String? model,
   AiApi api = AiApi.chat,
+  Map<String, String> customHeaders = const {},
 }) async {
+  final headers = validateAiHeaders(customHeaders);
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
     final base = aiBaseUrl(uri.toString())!;
@@ -69,11 +72,9 @@ Future<List<String>> checkAiEndpoint(
       target,
     );
     request.followRedirects = false;
-    if (key?.isNotEmpty == true) {
-      request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $key');
-    }
+    if (model != null) request.headers.contentType = ContentType.json;
+    applyAiHeaders(request.headers, key, headers);
     if (model != null) {
-      request.headers.contentType = ContentType.json;
       request.write(
         jsonEncode({
           'model': model,
@@ -122,6 +123,12 @@ Future<List<String>> checkAiEndpoint(
         .toSet()
         .toList()
       ..sort();
+  } catch (error, stack) {
+    final message = redactAiHeaderValues(error.toString(), headers);
+    if (message != error.toString()) {
+      Error.throwWithStackTrace(StateError(message), stack);
+    }
+    rethrow;
   } finally {
     client.close(force: true);
   }

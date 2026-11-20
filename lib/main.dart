@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/ai_endpoint.dart';
+import 'core/ai_headers.dart';
 import 'core/agent_context.dart';
 import 'core/app_store.dart';
 import 'core/host_trust.dart';
@@ -787,6 +788,17 @@ class _PocketHomeState extends State<PocketHome> {
   );
 }
 
+class _AiHeaderRow {
+  _AiHeaderRow([String headerName = '', String headerValue = ''])
+    : name = TextEditingController(text: headerName),
+      value = TextEditingController(text: headerValue);
+  final TextEditingController name, value;
+  void dispose() {
+    name.dispose();
+    value.dispose();
+  }
+}
+
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.store});
   final AppStore store;
@@ -820,6 +832,64 @@ class _SettingsPageState extends State<SettingsPage> {
   String? aiStatus;
   bool removeAiKey = false;
   List<String> models = [];
+  final headerRows = <_AiHeaderRow>[];
+  bool headersLoaded = false, headersEdited = false, headersHidden = true;
+
+  Map<String, String> _editedHeaders() {
+    final values = <String, String>{};
+    final names = <String>{};
+    for (final row in headerRows) {
+      final name = row.name.text.trim();
+      if (!names.add(name.toLowerCase())) {
+        throw const FormatException('请求头名称不能重复（不区分大小写）');
+      }
+      values[name] = row.value.text;
+    }
+    return validateAiHeaders(values);
+  }
+
+  void _resetHeaders() {
+    for (final row in headerRows) {
+      row.dispose();
+    }
+    headerRows.clear();
+    headersLoaded = false;
+    headersEdited = false;
+    headersHidden = true;
+  }
+
+  Future<void> _loadHeaders() async {
+    if (aiBusy) return;
+    if (aiBaseUrl(endpoint.text) == null) {
+      setState(() => aiStatus = '请先填写有效的 AI 网站地址');
+      return;
+    }
+    setState(() {
+      aiBusy = true;
+      aiStatus = null;
+    });
+    try {
+      if (!await widget.store.unlock() || !mounted) return;
+      final headers = await widget.store.aiHeaders(endpoint.text);
+      if (!mounted) return;
+      setState(() {
+        _resetHeaders();
+        headerRows.addAll(
+          headers.entries.map((entry) => _AiHeaderRow(entry.key, entry.value)),
+        );
+        headersLoaded = true;
+      });
+    } catch (_) {
+      if (mounted) setState(() => aiStatus = '无法读取已保存请求头，请检查设备认证和存储');
+    } finally {
+      if (mounted) setState(() => aiBusy = false);
+    }
+  }
+
+  Future<Map<String, String>> _requestHeaders() async {
+    if (headersEdited) return _editedHeaders();
+    return widget.store.aiHeaders(endpoint.text);
+  }
 
   Future<void> checkAi({required bool listModels}) async {
     final uri = aiEndpoint(endpoint.text, selectedApi);
@@ -835,11 +905,13 @@ class _SettingsPageState extends State<SettingsPage> {
       aiStatus = null;
     });
     try {
+      if (!await widget.store.unlock() || !mounted) return;
+      final headers = await _requestHeaders();
+      if (!mounted) return;
       String? key = apiKey.text.trim();
       if (key.isEmpty &&
           !removeAiKey &&
           aiBaseUrl(widget.store.aiEndpoint) == aiBaseUrl(endpoint.text)) {
-        if (!await widget.store.unlock() || !mounted) return;
         key = await widget.store.aiSecret(endpoint.text);
       }
       final result = await checkAiEndpoint(
@@ -847,6 +919,7 @@ class _SettingsPageState extends State<SettingsPage> {
         key,
         model: listModels ? null : selectedModel,
         api: selectedApi,
+        customHeaders: headers,
       );
       if (!mounted) return;
       setState(() {
@@ -877,6 +950,9 @@ class _SettingsPageState extends State<SettingsPage> {
     contextWindow.dispose();
     maxOutput.dispose();
     compression.dispose();
+    for (final row in headerRows) {
+      row.dispose();
+    }
     super.dispose();
   }
 
@@ -889,7 +965,9 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     late final AgentBudget limits;
+    Map<String, String>? editedHeaders;
     try {
+      if (headersEdited) editedHeaders = _editedHeaders();
       limits = AgentBudget(
         contextTokens: int.tryParse(contextWindow.text) ?? 0,
         maxOutputTokens: int.tryParse(maxOutput.text) ?? 0,
@@ -905,13 +983,17 @@ class _SettingsPageState extends State<SettingsPage> {
     final previousModel = widget.store.aiModel;
     final previousApi = widget.store.aiApi;
     final previousBudget = widget.store.aiBudget;
+    Map<String, String>? previousHeaders;
     setState(() {
       aiBusy = true;
       aiStatus = null;
     });
     try {
+      if ((editedHeaders != null || removeAiKey) &&
+          (!await widget.store.unlock() || !mounted)) {
+        return;
+      }
       if (removeAiKey) {
-        if (!await widget.store.unlock() || !mounted) return;
         for (final address in {
           base.toString(),
           aiEndpoint(base.toString(), AiApi.chat).toString(),
@@ -924,6 +1006,10 @@ class _SettingsPageState extends State<SettingsPage> {
         }
       } else if (apiKey.text.trim().isNotEmpty) {
         await widget.store.putSecret('ai:$base', apiKey.text.trim());
+      }
+      if (editedHeaders != null) {
+        previousHeaders = await widget.store.aiHeaders(base.toString());
+        await widget.store.putAiHeaders(base.toString(), editedHeaders);
       }
       widget.store.aiChannelName = channelName.text.trim();
       widget.store.aiEndpoint = base.toString();
@@ -943,6 +1029,9 @@ class _SettingsPageState extends State<SettingsPage> {
         widget.store.aiMaxOutputTokens = previousBudget.maxOutputTokens;
         widget.store.aiCompressionThreshold =
             previousBudget.compressionThreshold;
+        if (previousHeaders != null) {
+          await widget.store.putAiHeaders(base.toString(), previousHeaders);
+        }
         rethrow;
       }
       if (mounted) {
@@ -951,6 +1040,7 @@ class _SettingsPageState extends State<SettingsPage> {
         apiKey.clear();
         setState(() {
           removeAiKey = false;
+          headersEdited = false;
           aiStatus = 'AI 设置已保存';
         });
       }
@@ -1092,6 +1182,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         models = [];
                         aiStatus = null;
                         removeAiKey = false;
+                        _resetHeaders();
                       }),
                       keyboardType: TextInputType.url,
                       decoration: const InputDecoration(
@@ -1161,6 +1252,103 @@ class _SettingsPageState extends State<SettingsPage> {
                             : (value) =>
                                   setState(() => removeAiKey = value == true),
                       ),
+                    ExpansionTile(
+                      title: const Text('自定义请求头'),
+                      onExpansionChanged: (expanded) {
+                        if (expanded && !headersLoaded) {
+                          unawaited(_loadHeaders());
+                        }
+                      },
+                      children: [
+                        const Text(
+                          '适用于 Chat、Responses、模型列表和连接测试。请求头值加密保存；Authorization 可覆盖默认 Bearer。',
+                        ),
+                        if (!headersLoaded)
+                          TextButton(
+                            onPressed: aiBusy ? null : _loadHeaders,
+                            child: const Text('读取已保存请求头'),
+                          ),
+                        for (final row in headerRows)
+                          Padding(
+                            key: ObjectKey(row),
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      TextField(
+                                        controller: row.name,
+                                        enabled: !aiBusy,
+                                        autocorrect: false,
+                                        enableSuggestions: false,
+                                        decoration: const InputDecoration(
+                                          labelText: '请求头名称',
+                                          hintText: 'X-Custom-Header',
+                                        ),
+                                        onChanged: (_) => headersEdited = true,
+                                      ),
+                                      TextField(
+                                        controller: row.value,
+                                        enabled: !aiBusy,
+                                        obscureText: headersHidden,
+                                        autocorrect: false,
+                                        enableSuggestions: false,
+                                        decoration: const InputDecoration(
+                                          labelText: '请求头值',
+                                        ),
+                                        onChanged: (_) => headersEdited = true,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: '删除请求头',
+                                  onPressed: aiBusy
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            headerRows.remove(row);
+                                            headersEdited = true;
+                                          });
+                                          row.dispose();
+                                        },
+                                  icon: const Icon(Icons.delete_outline),
+                                ),
+                              ],
+                            ),
+                          ),
+                        Wrap(
+                          spacing: 8,
+                          children: [
+                            TextButton.icon(
+                              onPressed: aiBusy || !headersLoaded
+                                  ? null
+                                  : () => setState(() {
+                                      headerRows.add(_AiHeaderRow());
+                                      headersEdited = true;
+                                    }),
+                              icon: const Icon(Icons.add),
+                              label: const Text('添加请求头'),
+                            ),
+                            TextButton.icon(
+                              onPressed: aiBusy || headerRows.isEmpty
+                                  ? null
+                                  : () => setState(
+                                      () => headersHidden = !headersHidden,
+                                    ),
+                              icon: Icon(
+                                headersHidden
+                                    ? Icons.visibility
+                                    : Icons.visibility_off,
+                              ),
+                              label: Text(headersHidden ? '显示请求头值' : '隐藏请求头值'),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                     if (models.isNotEmpty)
                       DropdownMenu<String>(
                         expandedInsets: EdgeInsets.zero,

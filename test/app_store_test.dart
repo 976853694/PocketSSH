@@ -47,6 +47,56 @@ void main() {
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
   test(
+    'custom request headers use website-scoped secret storage and can be cleared',
+    () async {
+      final store = AppStore(channel: channel)
+        ..aiEndpoint = 'http://models.example.test';
+      await store.putAiHeaders('http://models.example.test/v1/responses', {
+        'X-Api-Key': 'fixture-header-value',
+      });
+      await store.save();
+      expect(saved['state'], isNot(contains('fixture-header-value')));
+      expect(saved['state'], isNot(contains('X-Api-Key')));
+      final restored = AppStore(channel: channel);
+      await restored.load();
+      expect(
+        await restored.aiHeaders(
+          'http://models.example.test/v1/chat/completions',
+        ),
+        {'X-Api-Key': 'fixture-header-value'},
+      );
+      expect(await restored.aiHeaders('http://another.example.test'), isEmpty);
+      expect(await restored.aiHeaders('https://models.example.test'), isEmpty);
+      await restored.putAiHeaders('http://models.example.test', {});
+      expect(await restored.aiHeaders('http://models.example.test'), isEmpty);
+      expect(
+        secrets.containsKey('ai-headers:http://models.example.test'),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'invalid headers are not saved and corrupt values are not echoed',
+    () async {
+      final store = AppStore(channel: channel);
+      await expectLater(
+        store.putAiHeaders('http://models.example.test', {'Host': 'fixture'}),
+        throwsFormatException,
+      );
+      expect(secrets, isEmpty);
+      secrets['ai-headers:http://models.example.test'] =
+          'invalid-json fixture-sensitive-value';
+      try {
+        await store.aiHeaders('http://models.example.test');
+        fail('Expected invalid stored headers');
+      } on FormatException catch (error) {
+        expect(error.toString(), isNot(contains('fixture-sensitive-value')));
+      }
+    },
+  );
+
+  test(
     'AI protocol and model budgets persist and old endpoint keys remain usable',
     () async {
       final store = AppStore(channel: channel)

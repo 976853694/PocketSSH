@@ -5,6 +5,7 @@ import 'dart:io';
 import 'agent_controller.dart';
 import 'agent_protocol.dart';
 import 'ai_endpoint.dart';
+import 'ai_headers.dart';
 
 class AgentTransport {
   const AgentTransport({
@@ -14,6 +15,7 @@ class AgentTransport {
     this.api = AiApi.chat,
     this.tools = agentTools,
     this.maxOutputTokens = 8192,
+    this.customHeaders = const {},
   });
   final Uri endpoint;
   final String model;
@@ -21,6 +23,7 @@ class AgentTransport {
   final AiApi api;
   final List<Map<String, Object>> tools;
   final int maxOutputTokens;
+  final Map<String, String> customHeaders;
 
   static List<Map<String, Object?>> responsesInput(
     List<Map<String, Object?>> messages,
@@ -64,6 +67,7 @@ class AgentTransport {
     int? outputTokens,
   }) async {
     cancellation.check();
+    final headers = validateAiHeaders(customHeaders);
     final output = outputTokens ?? maxOutputTokens;
     final http = HttpClient()..connectionTimeout = const Duration(seconds: 20);
     final unregister = cancellation.onCancel(() => http.close(force: true));
@@ -75,9 +79,7 @@ class AgentTransport {
       final request = await cancellation.wait(http.postUrl(endpoint));
       request.followRedirects = false;
       request.headers.contentType = ContentType.json;
-      if (apiKey?.isNotEmpty == true) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $apiKey');
-      }
+      applyAiHeaders(request.headers, apiKey, headers);
       final useTools = toolsEnabled && tools.isNotEmpty;
       request.write(
         jsonEncode({
@@ -178,6 +180,12 @@ class AgentTransport {
       if (event.isNotEmpty) dispatch();
       cancellation.check();
       return api == AiApi.chat ? chat.complete() : responses.complete();
+    } catch (error, stack) {
+      final message = redactAiHeaderValues(error.toString(), headers);
+      if (message != error.toString()) {
+        Error.throwWithStackTrace(StateError(message), stack);
+      }
+      rethrow;
     } finally {
       timer.cancel();
       unregister();

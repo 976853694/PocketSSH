@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'device_bridge.dart';
 import 'ai_endpoint.dart';
+import 'ai_headers.dart';
 import 'agent_context.dart';
 
 class HostProfile {
@@ -201,6 +202,30 @@ class AppStore extends ChangeNotifier {
       if (value != null) return value;
     }
     return null;
+  }
+
+  Future<Map<String, String>> aiHeaders(String input) async {
+    final base = aiBaseUrl(input);
+    if (base == null) throw const FormatException('请先填写有效的 AI 网站地址');
+    final raw = await secret('ai-headers:$base');
+    if (raw == null) return {};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) throw const FormatException();
+      return validateAiHeaders(Map<String, String>.from(decoded));
+    } catch (_) {
+      throw const FormatException('已保存的请求头无法读取，请重新设置');
+    }
+  }
+
+  Future<void> putAiHeaders(String input, Map<String, String> headers) async {
+    final base = aiBaseUrl(input);
+    if (base == null) throw const FormatException('请先填写有效的 AI 网站地址');
+    final validated = validateAiHeaders(headers);
+    await putSecret(
+      'ai-headers:$base',
+      validated.isEmpty ? null : jsonEncode(validated),
+    );
   }
 
   Future<Credentials?> credentials(

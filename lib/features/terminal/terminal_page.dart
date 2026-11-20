@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm2/xterm.dart';
 import '../../core/app_store.dart';
@@ -39,6 +40,10 @@ class _TerminalPageState extends State<TerminalPage> {
   WorkspaceSession get session => widget.session;
   String draft = '';
   bool _confirmingDraft = false;
+  Timer? _terminalPressTimer;
+  int? _terminalPressPointer;
+  Offset? _terminalPressStart;
+  bool _terminalLongPress = false, _terminalMenuOpen = false;
   bool search = false;
   List<TerminalSearchMatch> matches = [];
   int match = 0;
@@ -204,7 +209,7 @@ class _TerminalPageState extends State<TerminalPage> {
     final value = session.terminal.buffer.getText(selected, true);
     if (value.isEmpty) return;
     await Clipboard.setData(ClipboardData(text: value));
-    controller.clearSelection();
+    if (mounted) controller.clearSelection();
   }
 
   Future<void> _openAi([String? text]) async {
@@ -325,14 +330,101 @@ class _TerminalPageState extends State<TerminalPage> {
     );
   }
 
+  void _cancelTerminalPress() {
+    _terminalPressTimer?.cancel();
+    _terminalPressTimer = null;
+    _terminalPressPointer = null;
+    _terminalPressStart = null;
+    _terminalLongPress = false;
+  }
+
+  void _onTerminalPointerDown(PointerDownEvent event) {
+    if (event.kind != PointerDeviceKind.touch || _terminalMenuOpen) return;
+    if (_terminalPressPointer != null) {
+      _cancelTerminalPress();
+      return;
+    }
+    _terminalPressPointer = event.pointer;
+    _terminalPressStart = event.position;
+    _terminalPressTimer = Timer(
+      kLongPressTimeout,
+      () => _terminalLongPress = true,
+    );
+  }
+
+  void _onTerminalPointerMove(PointerMoveEvent event) {
+    if (event.pointer != _terminalPressPointer || _terminalLongPress) return;
+    if ((event.position - _terminalPressStart!).distance > kTouchSlop) {
+      _cancelTerminalPress();
+    }
+  }
+
+  void _onTerminalPointerUp(PointerUpEvent event) {
+    if (event.pointer != _terminalPressPointer) return;
+    final showMenu = _terminalLongPress;
+    _cancelTerminalPress();
+    if (showMenu) unawaited(_showTerminalClipboardMenu(event.position));
+  }
+
+  Future<void> _showTerminalClipboardMenu(Offset position) async {
+    if (!mounted || _terminalMenuOpen) return;
+    final overlay =
+        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+    final localPosition = overlay.globalToLocal(position);
+    final selection = controller.selectionFor(session.terminal.buffer);
+    final canCopy =
+        selection != null &&
+        session.terminal.buffer.getText(selection, true).isNotEmpty;
+    _terminalMenuOpen = true;
+    try {
+      final action = await showMenu<String>(
+        context: context,
+        position: RelativeRect.fromRect(
+          Rect.fromLTWH(localPosition.dx, localPosition.dy, 0, 0),
+          Offset.zero & overlay.size,
+        ),
+        items: [
+          PopupMenuItem(
+            value: 'copy',
+            enabled: canCopy,
+            child: const Text('复制'),
+          ),
+          PopupMenuItem(
+            value: 'paste',
+            enabled: session.connected,
+            child: const Text('粘贴'),
+          ),
+        ],
+      );
+      if (!mounted) return;
+      if (action == 'copy') await _copySelection();
+      if (action == 'paste') await _paste();
+    } catch (_) {
+      if (mounted) _notice('无法访问剪贴板，请重试。');
+    } finally {
+      _terminalMenuOpen = false;
+    }
+  }
+
   Future<void> _paste() async {
+    if (!session.connected) return;
+    final connection = session.connection;
     final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-    if (text != null && session.connected) session.terminal.paste(text);
+    if (!mounted ||
+        !session.connected ||
+        !identical(connection, session.connection) ||
+        text == null ||
+        text.isEmpty) {
+      return;
+    }
+    controller.clearSelection();
+    session.terminal.paste(text);
   }
 
   @override
   void dispose() {
     session.removeListener(update);
+    _cancelTerminalPress();
     controller.dispose();
     draftController.dispose();
     searchField.dispose();
@@ -515,15 +607,21 @@ class _TerminalPageState extends State<TerminalPage> {
           Expanded(
             child: Container(
               color: background,
-              child: TerminalView(
-                session.terminal,
-                key: view,
-                controller: controller,
-                theme: theme,
-                textStyle: TerminalStyle(fontSize: widget.store.fontSize),
-                padding: const EdgeInsets.all(10),
-                readOnly: !session.connected,
-                onPaste: _paste,
+              child: Listener(
+                onPointerDown: _onTerminalPointerDown,
+                onPointerMove: _onTerminalPointerMove,
+                onPointerUp: _onTerminalPointerUp,
+                onPointerCancel: (_) => _cancelTerminalPress(),
+                child: TerminalView(
+                  session.terminal,
+                  key: view,
+                  controller: controller,
+                  theme: theme,
+                  textStyle: TerminalStyle(fontSize: widget.store.fontSize),
+                  padding: const EdgeInsets.all(10),
+                  readOnly: !session.connected,
+                  onPaste: _paste,
+                ),
               ),
             ),
           ),
