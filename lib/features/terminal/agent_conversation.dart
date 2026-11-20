@@ -17,7 +17,7 @@ class _AgentConversationState extends State<AgentConversation> {
   final _cards = <AgentEvent, Widget>{};
   final _indices = <AgentEvent, int>{};
   AgentEvent? _tail, _lastUser;
-  bool _following = true, _scrollScheduled = false;
+  bool _following = true, _scrollScheduled = false, _userScrolling = false;
 
   @override
   void initState() {
@@ -75,8 +75,22 @@ class _AgentConversationState extends State<AgentConversation> {
   }
 
   void _onScroll() {
-    final following = _scroll.position.pixels <= 48;
+    if (_userScrolling) return;
+    final following = _scroll.position.pixels <= 1;
     if (_following != following) setState(() => _following = following);
+  }
+
+  bool _onScrollNotification(ScrollNotification notification) {
+    if (notification.depth != 0) return false;
+    if (notification is ScrollStartNotification &&
+        notification.dragDetails != null) {
+      _userScrolling = true;
+      if (_following) setState(() => _following = false);
+    } else if (notification is ScrollEndNotification) {
+      _userScrolling = false;
+      _onScroll();
+    }
+    return false;
   }
 
   void _scheduleFollow() {
@@ -110,49 +124,54 @@ class _AgentConversationState extends State<AgentConversation> {
     final count = events.length + errorCount;
     return Stack(
       children: [
-        NotificationListener<ScrollMetricsNotification>(
-          onNotification: (_) {
-            _scheduleFollow();
-            return false;
-          },
-          child: ListView.builder(
-            key: const ValueKey('agent-messages'),
-            controller: _scroll,
-            reverse: true,
-            padding: const EdgeInsets.all(16),
-            itemCount: count == 0 ? 1 : count,
-            findChildIndexCallback: (key) {
-              if (key == const ValueKey('agent-error')) {
-                return error == null ? null : 0;
-              }
-              if (key is! ObjectKey) return null;
-              final index = _indices[key.value];
-              return index == null
-                  ? null
-                  : events.length - 1 - index + errorCount;
+        NotificationListener<ScrollNotification>(
+          onNotification: _onScrollNotification,
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: (_) {
+              _scheduleFollow();
+              return false;
             },
-            itemBuilder: (context, index) {
-              if (count == 0) {
-                return const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text(
-                    '描述你要完成的任务。Agent 会按需执行命令、读取结果并继续操作。也可以直接聊天。\n\n每条命令使用独立 Shell，可指定工作目录；不会混入你正在输入的交互终端。',
-                  ),
+            child: ListView.builder(
+              key: const ValueKey('agent-messages'),
+              controller: _scroll,
+              reverse: true,
+              padding: const EdgeInsets.all(16),
+              itemCount: count == 0 ? 1 : count,
+              findChildIndexCallback: (key) {
+                if (key == const ValueKey('agent-error')) {
+                  return error == null ? null : 0;
+                }
+                if (key is! ObjectKey) return null;
+                final index = _indices[key.value];
+                return index == null
+                    ? null
+                    : events.length - 1 - index + errorCount;
+              },
+              itemBuilder: (context, index) {
+                if (count == 0) {
+                  return const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      '描述你要完成的任务。Agent 会按需执行命令、读取结果并继续操作。也可以直接聊天。\n\n每条命令使用独立 Shell，可指定工作目录；不会混入你正在输入的交互终端。',
+                    ),
+                  );
+                }
+                if (index < errorCount) {
+                  return SelectableText(
+                    error!,
+                    key: const ValueKey('agent-error'),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  );
+                }
+                final event = events[events.length - 1 - (index - errorCount)];
+                return _cards.putIfAbsent(
+                  event,
+                  () => _AgentMessage(key: ObjectKey(event), event: event),
                 );
-              }
-              if (index < errorCount) {
-                return SelectableText(
-                  error!,
-                  key: const ValueKey('agent-error'),
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                );
-              }
-              final event = events[events.length - 1 - (index - errorCount)];
-              return _cards.putIfAbsent(
-                event,
-                () => _AgentMessage(key: ObjectKey(event), event: event),
-              );
-            },
+              },
+            ),
           ),
         ),
         if (!_following)

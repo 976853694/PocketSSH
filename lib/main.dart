@@ -795,6 +795,9 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  late final channelName = TextEditingController(
+    text: widget.store.aiChannelName,
+  );
   late final endpoint = TextEditingController(
     text:
         aiBaseUrl(widget.store.aiEndpoint)?.toString() ??
@@ -868,6 +871,7 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     endpoint.dispose();
+    channelName.dispose();
     model.dispose();
     apiKey.dispose();
     contextWindow.dispose();
@@ -896,6 +900,7 @@ class _SettingsPageState extends State<SettingsPage> {
       return;
     }
     final base = aiBaseUrl(endpoint.text)!;
+    final previousChannelName = widget.store.aiChannelName;
     final previousEndpoint = widget.store.aiEndpoint;
     final previousModel = widget.store.aiModel;
     final previousApi = widget.store.aiApi;
@@ -920,6 +925,7 @@ class _SettingsPageState extends State<SettingsPage> {
       } else if (apiKey.text.trim().isNotEmpty) {
         await widget.store.putSecret('ai:$base', apiKey.text.trim());
       }
+      widget.store.aiChannelName = channelName.text.trim();
       widget.store.aiEndpoint = base.toString();
       widget.store.aiModel = model.text.trim();
       widget.store.aiApi = selectedApi;
@@ -929,6 +935,7 @@ class _SettingsPageState extends State<SettingsPage> {
       try {
         await widget.store.save();
       } catch (_) {
+        widget.store.aiChannelName = previousChannelName;
         widget.store.aiEndpoint = previousEndpoint;
         widget.store.aiModel = previousModel;
         widget.store.aiApi = previousApi;
@@ -940,6 +947,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       if (mounted) {
         endpoint.text = base.toString();
+        channelName.text = widget.store.aiChannelName;
         apiKey.clear();
         setState(() {
           removeAiKey = false;
@@ -1067,6 +1075,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
+                    TextField(
+                      controller: channelName,
+                      enabled: !aiBusy,
+                      decoration: const InputDecoration(
+                        labelText: '渠道名称',
+                        hintText: '例如：主用接口',
+                        helperText: '留空时显示网站域名',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
                     TextField(
                       controller: endpoint,
                       enabled: !aiBusy,

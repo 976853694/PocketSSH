@@ -52,6 +52,7 @@ void main() {
       final store = AppStore(channel: channel)
         ..aiEndpoint = 'http://models.example.test'
         ..aiApi = AiApi.responses
+        ..aiChannelName = '主用渠道'
         ..aiModel = 'test-model'
         ..aiContextTokens = 131072
         ..aiMaxOutputTokens = 16384
@@ -60,12 +61,31 @@ void main() {
       final restored = AppStore(channel: channel);
       await restored.load();
       expect(restored.aiApi, AiApi.responses);
+      expect(restored.aiChannelName, '主用渠道');
+      expect(restored.aiChannelLabel, '主用渠道');
       expect(restored.aiBudget.contextTokens, 131072);
       expect(restored.aiBudget.maxOutputTokens, 16384);
       expect(restored.aiBudget.compressionThreshold, .8);
       secrets['ai:http://models.example.test/v1/chat/completions'] = 'fixture';
       expect(await restored.aiSecret(restored.aiEndpoint), 'fixture');
       expect(await restored.aiSecret('http://another.example.test'), isNull);
+    },
+  );
+
+  test(
+    'old AI configurations without a channel name keep their endpoint and key',
+    () async {
+      saved['state'] = jsonEncode({
+        'aiEndpoint': 'http://models.example.test/v1/chat/completions',
+        'aiModel': 'test-model',
+      });
+      secrets['ai:http://models.example.test/v1/chat/completions'] = 'fixture';
+      final store = AppStore(channel: channel);
+      await store.load();
+      expect(store.aiChannelName, isEmpty);
+      expect(store.aiChannelLabel, 'models.example.test');
+      expect(await store.aiSecret(store.aiEndpoint), 'fixture');
+      expect(store.error, isNull);
     },
   );
 

@@ -93,7 +93,11 @@ class AppStore extends ChangeNotifier {
   String theme = 'system',
       terminalTheme = 'dark',
       aiEndpoint = '',
-      aiModel = '';
+      aiModel = '',
+      aiChannelName = '';
+  String get aiChannelLabel => aiChannelName.trim().isNotEmpty
+      ? aiChannelName.trim()
+      : aiBaseUrl(aiEndpoint)?.host ?? 'AI 服务';
   AiApi aiApi = AiApi.chat;
   int aiContextTokens = 65536, aiMaxOutputTokens = 8192;
   double aiCompressionThreshold = .75;
@@ -125,6 +129,7 @@ class AppStore extends ChangeNotifier {
         terminalTheme = j['terminalTheme'] as String? ?? 'dark';
         aiEndpoint = j['aiEndpoint'] as String? ?? '';
         aiModel = j['aiModel'] as String? ?? '';
+        aiChannelName = j['aiChannelName'] as String? ?? '';
         aiApi = j['aiApi'] == 'responses' ? AiApi.responses : AiApi.chat;
         aiContextTokens = j['aiContextTokens'] as int? ?? 65536;
         aiMaxOutputTokens = j['aiMaxOutputTokens'] as int? ?? 8192;
@@ -165,6 +170,7 @@ class AppStore extends ChangeNotifier {
         'recentCommandHistory': recentCommandHistory,
         'aiEndpoint': aiEndpoint,
         'aiModel': aiModel,
+        'aiChannelName': aiChannelName,
         'aiApi': aiApi.name,
         'aiContextTokens': aiContextTokens,
         'aiMaxOutputTokens': aiMaxOutputTokens,

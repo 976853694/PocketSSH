@@ -33,6 +33,92 @@ void seed(AgentController agent, [int count = 200]) {
 
 void main() {
   testWidgets(
+    'slow drag during a streamed long reply is not pulled back to latest',
+    (tester) async {
+      final reply = Completer<AgentReply>();
+      late void Function(String) emit;
+      final agent = controller(
+        model: (_, _, onText) {
+          emit = onText;
+          return reply.future;
+        },
+      );
+      seed(agent, 20);
+      await tester.pumpWidget(host(agent));
+      final task = agent.send('继续', policy: const AgentPolicy());
+      await tester.pump();
+      emit('长回复内容\n' * 80);
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pump();
+      final finder = find.byKey(const ValueKey('agent-messages'));
+      final scroll = tester.widget<ListView>(finder).controller!;
+      final gesture = await tester.startGesture(tester.getCenter(finder));
+      await gesture.moveBy(const Offset(0, 25));
+      await tester.pump();
+      expect(scroll.offset, greaterThan(0));
+      expect(scroll.offset, lessThan(48));
+      final before = scroll.offset;
+      emit('流式追加\n');
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pump();
+      expect(scroll.offset, greaterThanOrEqualTo(before));
+      await gesture.up();
+      await tester.pumpAndSettle();
+      emit('松手后继续追加\n');
+      await tester.pump(const Duration(milliseconds: 60));
+      await tester.pump();
+      expect(scroll.offset, greaterThan(1));
+      expect(find.byKey(const ValueKey('agent-show-latest')), findsOneWidget);
+      agent.stop();
+      await task;
+      await tester.pumpWidget(const SizedBox.shrink());
+      agent.dispose();
+    },
+  );
+
+  testWidgets('history remains scrollable inside the modal chat sheet', (
+    tester,
+  ) async {
+    final agent = controller();
+    seed(agent, 40);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: FilledButton(
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                useSafeArea: true,
+                builder: (_) => SizedBox(
+                  height: 450,
+                  child: AgentConversation(agent: agent),
+                ),
+              ),
+              child: const Text('打开聊天'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('打开聊天'));
+    await tester.pumpAndSettle();
+    final finder = find.byKey(const ValueKey('agent-messages'));
+    await tester.drag(finder, const Offset(0, 200));
+    await tester.pumpAndSettle();
+    final scroll = tester.widget<ListView>(finder).controller!;
+    expect(scroll.offset, greaterThan(48));
+    final before = scroll.offset;
+    agent.events.last.text += '追加内容\n' * 30;
+    await tester.pump();
+    await tester.pump();
+    expect(scroll.offset, closeTo(before, 1));
+    expect(find.byKey(const ValueKey('agent-show-latest')), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    agent.dispose();
+  });
+
+  testWidgets(
     'long conversation builds only visible messages and opens at the latest',
     (tester) async {
       final agent = controller();

@@ -8,7 +8,9 @@ void main() {
   testWidgets('agent shows host and tool boundaries without sending requests', (
     tester,
   ) async {
-    final store = AppStore()..aiModel = 'test-model';
+    final store = AppStore()
+      ..aiModel = 'test-model'
+      ..aiChannelName = '主用渠道';
     final session = WorkspaceSession(
       HostProfile(id: 'test', name: 'My server', host: 'example.test'),
       500,
@@ -26,6 +28,7 @@ void main() {
       ),
     );
     expect(find.text('AI 终端'), findsOneWidget);
+    expect(find.textContaining('主用渠道 · test-model · Chat'), findsOneWidget);
     expect(find.textContaining('My server'), findsOneWidget);
     expect(find.text('发送'), findsOneWidget);
     expect(find.textContaining('上下文'), findsWidgets);

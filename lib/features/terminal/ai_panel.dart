@@ -238,7 +238,9 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                     children: [
                       Expanded(
                         child: Text(
-                          '${widget.store.aiModel} · ${widget.store.aiApi == AiApi.chat ? 'Chat' : 'Responses'}',
+                          '${widget.store.aiChannelLabel} · ${widget.store.aiModel} · ${widget.store.aiApi == AiApi.chat ? 'Chat' : 'Responses'}',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.labelSmall,
                         ),
                       ),
