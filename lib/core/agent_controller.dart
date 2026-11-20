@@ -47,10 +47,25 @@ class AgentCancellation {
   }
 }
 
-class AgentEvent {
-  AgentEvent(this.kind, this.text, {this.status = ''});
+class AgentEvent extends ChangeNotifier {
+  AgentEvent(this.kind, String text, {String status = ''})
+    : _text = text,
+      _status = status;
   final String kind;
-  String text, status;
+  String _text, _status;
+  String get text => _text;
+  set text(String value) {
+    if (_text == value) return;
+    _text = value;
+    notifyListeners();
+  }
+
+  String get status => _status;
+  set status(String value) {
+    if (_status == value) return;
+    _status = value;
+    notifyListeners();
+  }
 }
 
 typedef AgentModelRequest =
@@ -248,14 +263,32 @@ class AgentController extends ChangeNotifier {
         events.add(answer);
         status = '正在思考';
         _notify();
-        final reply = await cancellation.wait(
-          requestModel(List.of(transcript), cancellation, (text) {
-            if (!cancellation.cancelled && !_disposed) {
-              answer.text += text;
-              _notify();
-            }
-          }),
-        );
+        final pendingText = StringBuffer();
+        Timer? textUpdate;
+        void flushText() {
+          textUpdate?.cancel();
+          textUpdate = null;
+          if (pendingText.isEmpty || _disposed) return;
+          answer.text += pendingText.toString();
+          pendingText.clear();
+        }
+
+        late final AgentReply reply;
+        try {
+          reply = await cancellation.wait(
+            requestModel(List.of(transcript), cancellation, (text) {
+              if (!cancellation.cancelled && !_disposed && text.isNotEmpty) {
+                pendingText.write(text);
+                textUpdate ??= Timer(
+                  const Duration(milliseconds: 50),
+                  flushText,
+                );
+              }
+            }),
+          );
+        } finally {
+          flushText();
+        }
         cancellation.check();
         answer.text = reply.text;
         if (reply.inputTokens != null) {

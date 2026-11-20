@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../core/agent_controller.dart';
 import '../../core/agent_policy.dart';
@@ -10,6 +9,7 @@ import '../../core/ai_endpoint.dart';
 import '../../core/app_store.dart';
 import '../../core/sessions.dart';
 import '../../core/ssh_connection.dart';
+import 'agent_conversation.dart';
 
 class AiAgentPanel extends StatefulWidget {
   const AiAgentPanel({
@@ -281,85 +281,7 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                 ),
                 if (busy) const LinearProgressIndicator(minHeight: 2),
                 Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (agent.events.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(12),
-                          child: Text(
-                            '描述你要完成的任务。Agent 会按需执行命令、读取结果并继续操作。也可以直接聊天。\n\n每条命令使用独立 Shell，可指定工作目录；不会混入你正在输入的交互终端。',
-                          ),
-                        ),
-                      for (final event in agent.events)
-                        Card(
-                          color: event.kind == 'user'
-                              ? colors.primaryContainer
-                              : null,
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: event.kind == 'tool'
-                                ? ExpansionTile(
-                                    tilePadding: EdgeInsets.zero,
-                                    title: Text(event.status),
-                                    subtitle: Text(
-                                      event.text.split('\n').first,
-                                    ),
-                                    children: [
-                                      SelectableText(
-                                        event.text,
-                                        style: const TextStyle(
-                                          fontFamily: 'monospace',
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
-                                  )
-                                : Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        event.kind == 'user'
-                                            ? '你'
-                                            : event.kind == 'context'
-                                            ? event.status
-                                            : 'Agent',
-                                        style: Theme.of(
-                                          context,
-                                        ).textTheme.labelSmall,
-                                      ),
-                                      const SizedBox(height: 6),
-                                      SelectableText(
-                                        event.text.isEmpty
-                                            ? '正在思考…'
-                                            : event.text,
-                                      ),
-                                      if (event.text.isNotEmpty)
-                                        Align(
-                                          alignment: Alignment.centerRight,
-                                          child: IconButton(
-                                            tooltip: '复制',
-                                            onPressed: () => Clipboard.setData(
-                                              ClipboardData(text: event.text),
-                                            ),
-                                            icon: const Icon(
-                                              Icons.copy,
-                                              size: 18,
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                          ),
-                        ),
-                      if (localError ?? agent.error case final error?)
-                        SelectableText(
-                          error,
-                          style: TextStyle(color: colors.error),
-                        ),
-                    ],
-                  ),
+                  child: AgentConversation(agent: agent, error: localError),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
