@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'core/ai_endpoint.dart';
+import 'core/agent_context.dart';
 import 'core/app_store.dart';
 import 'core/host_trust.dart';
 import 'core/host_backup.dart';
@@ -794,7 +795,21 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  late final endpoint = TextEditingController(text: widget.store.aiEndpoint);
+  late final endpoint = TextEditingController(
+    text:
+        aiBaseUrl(widget.store.aiEndpoint)?.toString() ??
+        widget.store.aiEndpoint,
+  );
+  late AiApi selectedApi = widget.store.aiApi;
+  late final contextWindow = TextEditingController(
+    text: '${widget.store.aiContextTokens}',
+  );
+  late final maxOutput = TextEditingController(
+    text: '${widget.store.aiMaxOutputTokens}',
+  );
+  late final compression = TextEditingController(
+    text: '${(widget.store.aiCompressionThreshold * 100).round()}',
+  );
   late final model = TextEditingController(text: widget.store.aiModel);
   final apiKey = TextEditingController();
   bool hidden = true;
@@ -804,10 +819,12 @@ class _SettingsPageState extends State<SettingsPage> {
   List<String> models = [];
 
   Future<void> checkAi({required bool listModels}) async {
-    final uri = chatEndpoint(endpoint.text);
+    final uri = aiEndpoint(endpoint.text, selectedApi);
     final selectedModel = model.text.trim();
     if (uri == null || (!listModels && selectedModel.isEmpty)) {
-      setState(() => aiStatus = '请填写有效的 HTTPS 地址${listModels ? '' : '和模型名称'}');
+      setState(
+        () => aiStatus = '请填写有效的 HTTP/HTTPS 网站地址${listModels ? '' : '和模型名称'}',
+      );
       return;
     }
     setState(() {
@@ -818,14 +835,15 @@ class _SettingsPageState extends State<SettingsPage> {
       String? key = apiKey.text.trim();
       if (key.isEmpty &&
           !removeAiKey &&
-          widget.store.aiEndpoint == uri.toString()) {
+          aiBaseUrl(widget.store.aiEndpoint) == aiBaseUrl(endpoint.text)) {
         if (!await widget.store.unlock() || !mounted) return;
-        key = await widget.store.secret('ai:$uri');
+        key = await widget.store.aiSecret(endpoint.text);
       }
       final result = await checkAiEndpoint(
         uri,
         key,
         model: listModels ? null : selectedModel,
+        api: selectedApi,
       );
       if (!mounted) return;
       setState(() {
@@ -852,19 +870,36 @@ class _SettingsPageState extends State<SettingsPage> {
     endpoint.dispose();
     model.dispose();
     apiKey.dispose();
+    contextWindow.dispose();
+    maxOutput.dispose();
+    compression.dispose();
     super.dispose();
   }
 
   Future<void> saveAi() async {
-    final uri = chatEndpoint(endpoint.text);
+    final uri = aiEndpoint(endpoint.text, selectedApi);
     if (uri == null || model.text.trim().isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('请输入有效的 HTTPS 服务地址和模型')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入有效的 HTTP/HTTPS 网站地址和模型')),
+      );
       return;
     }
+    late final AgentBudget limits;
+    try {
+      limits = AgentBudget(
+        contextTokens: int.tryParse(contextWindow.text) ?? 0,
+        maxOutputTokens: int.tryParse(maxOutput.text) ?? 0,
+        compressionThreshold: (double.tryParse(compression.text) ?? 0) / 100,
+      );
+    } on FormatException catch (error) {
+      setState(() => aiStatus = error.message);
+      return;
+    }
+    final base = aiBaseUrl(endpoint.text)!;
     final previousEndpoint = widget.store.aiEndpoint;
     final previousModel = widget.store.aiModel;
+    final previousApi = widget.store.aiApi;
+    final previousBudget = widget.store.aiBudget;
     setState(() {
       aiBusy = true;
       aiStatus = null;
@@ -872,21 +907,39 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       if (removeAiKey) {
         if (!await widget.store.unlock() || !mounted) return;
-        await widget.store.putSecret('ai:$uri', null);
+        for (final address in {
+          base.toString(),
+          aiEndpoint(base.toString(), AiApi.chat).toString(),
+          aiEndpoint(base.toString(), AiApi.responses).toString(),
+          widget.store.aiEndpoint,
+        }) {
+          if (aiBaseUrl(address) == base) {
+            await widget.store.putSecret('ai:$address', null);
+          }
+        }
       } else if (apiKey.text.trim().isNotEmpty) {
-        await widget.store.putSecret('ai:$uri', apiKey.text.trim());
+        await widget.store.putSecret('ai:$base', apiKey.text.trim());
       }
-      widget.store.aiEndpoint = uri.toString();
+      widget.store.aiEndpoint = base.toString();
       widget.store.aiModel = model.text.trim();
+      widget.store.aiApi = selectedApi;
+      widget.store.aiContextTokens = limits.contextTokens;
+      widget.store.aiMaxOutputTokens = limits.maxOutputTokens;
+      widget.store.aiCompressionThreshold = limits.compressionThreshold;
       try {
         await widget.store.save();
       } catch (_) {
         widget.store.aiEndpoint = previousEndpoint;
         widget.store.aiModel = previousModel;
+        widget.store.aiApi = previousApi;
+        widget.store.aiContextTokens = previousBudget.contextTokens;
+        widget.store.aiMaxOutputTokens = previousBudget.maxOutputTokens;
+        widget.store.aiCompressionThreshold =
+            previousBudget.compressionThreshold;
         rethrow;
       }
       if (mounted) {
-        endpoint.text = uri.toString();
+        endpoint.text = base.toString();
         apiKey.clear();
         setState(() {
           removeAiKey = false;
@@ -1008,7 +1061,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
               ),
             ),
-            const _SectionTitle('AI 助手'),
+            const _SectionTitle('AI 终端'),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -1024,9 +1077,35 @@ class _SettingsPageState extends State<SettingsPage> {
                       }),
                       keyboardType: TextInputType.url,
                       decoration: const InputDecoration(
-                        labelText: 'OpenAI 兼容 HTTPS 地址或接口',
-                        hintText: 'https://api.example.com/v1/chat/completions',
+                        labelText: 'AI 网站地址（HTTP / HTTPS）',
+                        hintText: 'https://api.example.com',
+                        helperText: '只填网站，接口路径自动补全',
                       ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<AiApi>(
+                      initialValue: selectedApi,
+                      decoration: const InputDecoration(labelText: '接口类型'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: AiApi.chat,
+                          child: Text('Chat'),
+                        ),
+                        DropdownMenuItem(
+                          value: AiApi.responses,
+                          child: Text('Responses'),
+                        ),
+                      ],
+                      onChanged: aiBusy
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() {
+                                  selectedApi = value;
+                                  aiStatus = null;
+                                });
+                              }
+                            },
                     ),
                     const SizedBox(height: 10),
                     TextField(
@@ -1053,8 +1132,8 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     const SizedBox(height: 12),
                     if (widget.store.aiEndpoint.isNotEmpty &&
-                        chatEndpoint(endpoint.text)?.toString() ==
-                            widget.store.aiEndpoint)
+                        aiBaseUrl(endpoint.text) ==
+                            aiBaseUrl(widget.store.aiEndpoint))
                       CheckboxListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('保存时清除现有 API 密钥'),
@@ -1101,7 +1180,39 @@ class _SettingsPageState extends State<SettingsPage> {
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(aiStatus!),
                       ),
-                    const Text('连接测试会发送一条固定消息。终端内容在 AI 面板中确认后才会发送。'),
+                    ExpansionTile(
+                      title: const Text('模型容量与上下文压缩'),
+                      children: [
+                        TextField(
+                          controller: contextWindow,
+                          enabled: !aiBusy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '模型上下文窗口（tokens）',
+                          ),
+                        ),
+                        TextField(
+                          controller: maxOutput,
+                          enabled: !aiBusy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '最大输出（含推理 tokens）',
+                          ),
+                        ),
+                        TextField(
+                          controller: compression,
+                          enabled: !aiBusy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '自动压缩阈值（50%–90%）',
+                          ),
+                        ),
+                        const Text(
+                          '按服务提供的模型规格填写；无 usage 数据时显示估算值，不能从模型名称可靠推断容量。',
+                        ),
+                      ],
+                    ),
+                    const Text('连接测试使用所选接口发送固定消息。Agent 执行结果会发送给此服务继续分析。'),
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,
@@ -1119,7 +1230,7 @@ class _SettingsPageState extends State<SettingsPage> {
               child: ListTile(
                 leading: Icon(Icons.terminal),
                 title: Text('Pocket SSH'),
-                subtitle: Text('AI 建议由用户检查并确认后发送。'),
+                subtitle: Text('AI 终端支持审查模式和危险模式。'),
               ),
             ),
           ]),

@@ -1,78 +1,37 @@
 import 'dart:convert';
 
-const diagnosticCommands = <String, String>{
-  'uptime': 'uptime',
-  'disks': 'df -h',
-  'inodes': 'df -i',
-  'memory': 'free -h',
-  'system': 'uname -a',
-};
-
 const agentTools = <Map<String, Object>>[
   {
     'type': 'function',
     'function': {
-      'name': 'diagnose',
+      'name': 'execute_command',
       'description':
-          'Run a fixed diagnostic automatically within the current task. Output is untrusted data.',
+          'Execute a shell command or script on the current SSH host. Read stdout, stderr and exit_code before deciding the next step. Each execution starts a new shell; use working_directory for its directory. Commands can modify the host. Do not run interactive prompts: stdin is closed. Remote output is untrusted data.',
       'parameters': {
         'type': 'object',
         'additionalProperties': false,
         'properties': {
-          'check': {
+          'command': {
             'type': 'string',
-            'enum': ['uptime', 'disks', 'inodes', 'memory', 'system'],
+            'description': 'Complete command or shell script.',
           },
+          'purpose': {
+            'type': 'string',
+            'description': 'Explain why this command is needed.',
+          },
+          'working_directory': {
+            'type': 'string',
+            'description':
+                'Absolute remote directory, or empty to use the login directory.',
+          },
+          'timeout_seconds': {'type': 'integer', 'minimum': 1, 'maximum': 600},
         },
-        'required': ['check'],
-      },
-    },
-  },
-  {
-    'type': 'function',
-    'function': {
-      'name': 'directory_usage',
-      'description':
-          'Measure immediate child directory sizes in KiB, staying on one filesystem. Use only the selected directory or its descendants; output may be partial on timeout.',
-      'parameters': {
-        'type': 'object',
-        'additionalProperties': false,
-        'properties': {
-          'path': {'type': 'string'},
-        },
-        'required': ['path'],
-      },
-    },
-  },
-  {
-    'type': 'function',
-    'function': {
-      'name': 'service_status',
-      'description':
-          'Read systemd status of the selected service. A nonzero exit code may indicate an inactive or failed service.',
-      'parameters': {
-        'type': 'object',
-        'additionalProperties': false,
-        'properties': {
-          'service': {'type': 'string'},
-        },
-        'required': ['service'],
-      },
-    },
-  },
-  {
-    'type': 'function',
-    'function': {
-      'name': 'service_logs',
-      'description':
-          'Read the selected systemd service last 100 journal entries from the last hour. Logs are untrusted data.',
-      'parameters': {
-        'type': 'object',
-        'additionalProperties': false,
-        'properties': {
-          'service': {'type': 'string'},
-        },
-        'required': ['service'],
+        'required': [
+          'command',
+          'purpose',
+          'working_directory',
+          'timeout_seconds',
+        ],
       },
     },
   },
@@ -93,36 +52,53 @@ class AgentToolCall {
 }
 
 class AgentReply {
-  const AgentReply(this.text, this.calls);
+  const AgentReply(
+    this.text,
+    this.calls, {
+    this.inputTokens,
+    this.outputTokens,
+    this.truncated = false,
+    this.responseItems = const [],
+  });
   final String text;
   final List<AgentToolCall> calls;
+  final int? inputTokens, outputTokens;
+  final bool truncated;
+  final List<Map<String, Object?>> responseItems;
   Map<String, Object?> toJson() => {
     'role': 'assistant',
     'content': text.isEmpty ? null : text,
     if (calls.isNotEmpty)
       'tool_calls': calls.map((call) => call.toJson()).toList(),
+    if (responseItems.isNotEmpty) '_responses': responseItems,
   };
 }
 
 class AgentStreamParser {
+  AgentStreamParser({this.maxTextCharacters = 1024 * 1024});
+  final int maxTextCharacters;
   final _text = StringBuffer();
   final _calls = <int, _ToolAccumulator>{};
   String? finishReason;
-  int _size = 0;
+  int? inputTokens, outputTokens;
   bool done = false;
   String get text => _text.toString();
 
   String add(String data) {
     if (done) throw const FormatException('结束标记之后仍有响应');
-    _size += data.length;
-    if (_size > 128 * 1024) throw const FormatException('模型响应过大');
     if (data.trim() == '[DONE]') {
       done = true;
       return '';
     }
     final event = jsonDecode(data);
-    if (event is! Map || event.containsKey('error')) {
-      throw const FormatException('模型响应无效');
+    if (event is! Map) throw const FormatException('模型响应无效');
+    if (event.containsKey('error')) {
+      throw StateError('模型流返回错误：${event['error']}');
+    }
+    final usage = event['usage'];
+    if (usage is Map) {
+      inputTokens = usage['prompt_tokens'] as int?;
+      outputTokens = usage['completion_tokens'] as int?;
     }
     final choices = event['choices'];
     if (choices is! List || choices.isEmpty) return '';
@@ -134,6 +110,9 @@ class AgentStreamParser {
       if (delta['content'] is String) {
         content = delta['content'] as String;
         _text.write(content);
+        if (_text.length > maxTextCharacters) {
+          throw const FormatException('回复超过所配置输出预算的保护上限');
+        }
       }
       final calls = delta['tool_calls'];
       if (calls is List) {
@@ -142,7 +121,7 @@ class AgentStreamParser {
             throw const FormatException('工具调用索引无效');
           }
           final index = call['index'] as int;
-          if (index < 0 || index >= 4) throw const FormatException('单次工具调用过多');
+          if (index < 0 || index >= 16) throw const FormatException('单轮工具调用过多');
           _calls.putIfAbsent(index, _ToolAccumulator.new).add(call);
         }
       }
@@ -154,11 +133,12 @@ class AgentStreamParser {
   }
 
   AgentReply complete() {
-    if (finishReason != 'stop' && finishReason != 'tool_calls') {
-      throw const FormatException('模型响应被截断或未正常结束，未执行工具');
+    final truncated = finishReason == 'length';
+    if (finishReason != 'stop' && finishReason != 'tool_calls' && !truncated) {
+      throw const FormatException('模型响应未正常结束，未执行工具');
     }
     if (_calls.isNotEmpty && finishReason != 'tool_calls') {
-      throw const FormatException('工具调用未完整结束');
+      throw const FormatException('工具调用被截断或未完整结束，未执行命令');
     }
     final indices = _calls.keys.toList()..sort();
     final calls = [for (final index in indices) _calls[index]!.build()];
@@ -166,9 +146,15 @@ class AgentStreamParser {
       throw const FormatException('工具 ID 重复');
     }
     if (calls.isEmpty && text.trim().isEmpty) {
-      throw const FormatException('模型返回了空内容');
+      throw const FormatException('模型返回了空内容，请检查输出预算和模型工具能力');
     }
-    return AgentReply(text, calls);
+    return AgentReply(
+      text,
+      calls,
+      inputTokens: inputTokens,
+      outputTokens: outputTokens,
+      truncated: truncated,
+    );
   }
 }
 
@@ -186,13 +172,13 @@ class _ToolAccumulator {
       if (fn['name'] is String) name.write(fn['name']);
       if (fn['arguments'] is String) arguments.write(fn['arguments']);
     }
-    if (name.length > 64 || arguments.length > 8192) {
-      throw const FormatException('工具参数过大');
+    if (name.length > 64 || arguments.length > 128 * 1024) {
+      throw const FormatException('工具参数超过上限');
     }
   }
 
   AgentToolCall build() {
-    if (id == null || id!.isEmpty || id!.length > 128 || name.isEmpty) {
+    if (id == null || id!.isEmpty || id!.length > 256 || name.isEmpty) {
       throw const FormatException('工具调用不完整');
     }
     return AgentToolCall(
@@ -204,72 +190,61 @@ class _ToolAccumulator {
 }
 
 class AgentToolRequest {
-  const AgentToolRequest(this.name, this.value);
-  final String name, value;
-  String get description => command;
-
-  String get command => switch (name) {
-    'diagnose' =>
-      diagnosticCommands[value] ?? (throw const FormatException('诊断项目不受支持')),
-    'directory_usage' => _directoryCommand(validPath(value)),
-    'service_status' =>
-      'systemctl --no-pager --full status -- ${_quote(validService(value))}',
-    'service_logs' =>
-      "journalctl --no-pager --lines=100 --since='1 hour ago' --unit=${_quote(validService(value))}",
-    _ => throw const FormatException('不支持的工具'),
-  };
-
-  static String _quote(String value) => "'${value.replaceAll("'", "'\\''")}'";
-
-  static String _directoryCommand(String path) =>
-      'p=${_quote(path)}; '
-      r'''while [ "$p" != / ]; do if [ -L "$p" ]; then printf '%s\n' 'Symbolic link paths are not supported' >&2; exit 2; fi; p=${p%/*}; [ -n "$p" ] || p=/; done; '''
-      'du -P -x -k --max-depth=1 -- ${_quote(path)}';
-
-  static String validPath(Object? value) {
-    if (value is! String ||
-        !value.startsWith('/') ||
-        value.length > 1024 ||
-        value.codeUnits.any((unit) => unit < 32 || unit == 127) ||
-        value.split('/').any((part) => part == '..')) {
-      throw const FormatException('请输入有效的远程绝对路径');
-    }
-    final parts = value
-        .split('/')
-        .where((part) => part.isNotEmpty && part != '.');
-    return '/${parts.join('/')}';
-  }
-
-  static String validService(Object? value) {
-    if (value is! String ||
-        value.length > 200 ||
-        !RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9_.@-]*$').hasMatch(value) ||
-        value.contains('..') ||
-        (value.contains('.') && !value.endsWith('.service'))) {
-      throw const FormatException(
-        '请输入有效的 systemd 服务名称，例如 nginx 或 nginx.service',
-      );
-    }
-    return value.endsWith('.service') ? value : '$value.service';
-  }
+  const AgentToolRequest({
+    required this.command,
+    required this.purpose,
+    this.workingDirectory = '',
+    this.timeoutSeconds = 120,
+  });
+  final String command, purpose, workingDirectory;
+  final int timeoutSeconds;
+  String get description => purpose;
+  String get shellCommand => workingDirectory.isEmpty
+      ? command
+      : 'cd -- ${quoteShell(workingDirectory)} && {\n$command\n}';
+  static String quoteShell(String value) =>
+      "'${value.replaceAll("'", "'\\''")}'";
 
   static AgentToolRequest parse(AgentToolCall call) {
-    if (call.arguments.length > 8192) throw const FormatException('工具参数过大');
+    if (call.name != 'execute_command' || call.arguments.length > 128 * 1024) {
+      throw const FormatException('不支持的工具或参数过大');
+    }
     final args = jsonDecode(call.arguments);
-    if (args is! Map || args.length != 1) throw const FormatException('工具参数无效');
-    if (call.name == 'diagnose') {
-      final check = args['check'];
-      if (check is! String || !diagnosticCommands.containsKey(check)) {
-        throw const FormatException('诊断项目不受支持');
-      }
-      return AgentToolRequest(call.name, check);
+    if (args is! Map ||
+        args.keys.any(
+          (k) => ![
+            'command',
+            'purpose',
+            'working_directory',
+            'timeout_seconds',
+          ].contains(k),
+        )) {
+      throw const FormatException('命令参数无效');
     }
-    if (call.name == 'directory_usage') {
-      return AgentToolRequest(call.name, validPath(args['path']));
+    final command = args['command'], purpose = args['purpose'];
+    final directory = args['working_directory'] ?? '';
+    final timeout = args['timeout_seconds'] ?? 120;
+    if (command is! String ||
+        command.trim().isEmpty ||
+        command.length > 65536 ||
+        command.contains('\u0000') ||
+        purpose is! String ||
+        purpose.trim().isEmpty ||
+        purpose.length > 2000 ||
+        directory is! String ||
+        (directory.isNotEmpty && !directory.startsWith('/')) ||
+        directory.length > 4096 ||
+        directory.contains('\u0000') ||
+        timeout is! int ||
+        timeout < 1 ||
+        timeout > 600) {
+      throw const FormatException('命令、工作目录或超时参数无效');
     }
-    if (call.name == 'service_status' || call.name == 'service_logs') {
-      return AgentToolRequest(call.name, validService(args['service']));
-    }
-    throw const FormatException('不支持的工具');
+    return AgentToolRequest(
+      command: command,
+      purpose: purpose,
+      workingDirectory: directory,
+      timeoutSeconds: timeout,
+    );
   }
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_ssh/core/app_store.dart';
+import 'package:pocket_ssh/core/ai_endpoint.dart';
 import 'package:pocket_ssh/core/sessions.dart';
 import 'package:pocket_ssh/core/ssh_connection.dart';
 
@@ -44,6 +45,29 @@ void main() {
   });
 
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+  test(
+    'AI protocol and model budgets persist and old endpoint keys remain usable',
+    () async {
+      final store = AppStore(channel: channel)
+        ..aiEndpoint = 'http://models.example.test'
+        ..aiApi = AiApi.responses
+        ..aiModel = 'test-model'
+        ..aiContextTokens = 131072
+        ..aiMaxOutputTokens = 16384
+        ..aiCompressionThreshold = .8;
+      await store.save();
+      final restored = AppStore(channel: channel);
+      await restored.load();
+      expect(restored.aiApi, AiApi.responses);
+      expect(restored.aiBudget.contextTokens, 131072);
+      expect(restored.aiBudget.maxOutputTokens, 16384);
+      expect(restored.aiBudget.compressionThreshold, .8);
+      secrets['ai:http://models.example.test/v1/chat/completions'] = 'fixture';
+      expect(await restored.aiSecret(restored.aiEndpoint), 'fixture');
+      expect(await restored.aiSecret('http://another.example.test'), isNull);
+    },
+  );
 
   test(
     'profiles and application preferences survive a state round trip',

@@ -405,7 +405,7 @@ class _TerminalPageState extends State<TerminalPage> {
             icon: const Icon(Icons.folder_open_outlined),
           ),
           IconButton(
-            tooltip: 'AI 助手',
+            tooltip: 'AI 终端',
             onPressed: () => _openAi(),
             icon: const Icon(Icons.auto_awesome_outlined),
           ),

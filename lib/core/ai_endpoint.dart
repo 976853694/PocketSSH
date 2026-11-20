@@ -1,10 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 
-Uri? chatEndpoint(String input) {
+enum AiApi { chat, responses }
+
+Uri? aiBaseUrl(String input) {
   final uri = Uri.tryParse(input.trim());
   if (uri == null ||
-      uri.scheme != 'https' ||
+      !['http', 'https'].contains(uri.scheme) ||
       uri.host.isEmpty ||
       uri.userInfo.isNotEmpty ||
       uri.hasQuery ||
@@ -12,45 +14,62 @@ Uri? chatEndpoint(String input) {
     return null;
   }
   var path = uri.path.replaceFirst(RegExp(r'/+$'), '');
-  if (path.isEmpty) path = '/v1';
-  if (!path.endsWith('/chat/completions')) path = '$path/chat/completions';
+  path = path.replaceFirst(RegExp(r'/(chat/completions|responses)$'), '');
+  path = path.replaceFirst(RegExp(r'/v1$'), '');
   return uri.replace(path: path);
 }
 
-String? aiStreamText(String line) {
+Uri? aiEndpoint(String input, AiApi api) {
+  final base = aiBaseUrl(input);
+  if (base == null) return null;
+  return base.replace(
+    path:
+        '${base.path}/v1/${api == AiApi.chat ? 'chat/completions' : 'responses'}',
+  );
+}
+
+Uri? chatEndpoint(String input) => aiEndpoint(input, AiApi.chat);
+
+String? aiStreamText(String line, {AiApi api = AiApi.chat}) {
   if (!line.startsWith('data:')) return null;
   final data = line.substring(5).trim();
   if (data.isEmpty || data == '[DONE]') return null;
   final payload = jsonDecode(data);
   if (payload is! Map) return null;
+  if (payload['error'] != null || payload['type'] == 'response.failed') {
+    throw const FormatException('模型返回错误');
+  }
+  if (api == AiApi.responses) {
+    return payload['type'] == 'response.output_text.delta'
+        ? payload['delta'] as String?
+        : null;
+  }
   final choices = payload['choices'];
   if (choices is! List || choices.isEmpty || choices.first is! Map) return null;
   final delta = choices.first['delta'];
-  final text = delta is Map ? delta['content'] : null;
-  return text is String ? text : null;
+  return delta is Map && delta['content'] is String
+      ? delta['content'] as String
+      : null;
 }
 
 Future<List<String>> checkAiEndpoint(
   Uri uri,
   String? key, {
   String? model,
+  AiApi api = AiApi.chat,
 }) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
   try {
+    final base = aiBaseUrl(uri.toString())!;
     final target = model == null
-        ? uri.replace(
-            path: uri.path.replaceFirst(
-              RegExp(r'/chat/completions$'),
-              '/models',
-            ),
-          )
+        ? base.replace(path: '${base.path}/v1/models')
         : uri;
     final request = await client.openUrl(
       model == null ? 'GET' : 'POST',
       target,
     );
     request.followRedirects = false;
-    if (key != null && key.isNotEmpty) {
+    if (key?.isNotEmpty == true) {
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $key');
     }
     if (model != null) {
@@ -59,9 +78,14 @@ Future<List<String>> checkAiEndpoint(
         jsonEncode({
           'model': model,
           'stream': true,
-          'messages': [
-            {'role': 'user', 'content': 'Reply with OK.'},
-          ],
+          if (api == AiApi.chat)
+            'messages': [
+              {'role': 'user', 'content': 'Reply with OK.'},
+            ]
+          else ...{
+            'input': 'Reply with OK.',
+            'store': false,
+          },
         }),
       );
     }
@@ -70,15 +94,17 @@ Future<List<String>> checkAiEndpoint(
       throw HttpException('服务返回 HTTP ${response.statusCode}');
     }
     if (model != null) {
+      var size = 0;
       await for (final line
           in response
               .transform(utf8.decoder)
               .transform(const LineSplitter())
-              .timeout(const Duration(seconds: 15))) {
-        if (aiStreamText(line)?.isNotEmpty == true) return const [];
-        if (line.trim() == 'data: [DONE]') break;
+              .timeout(const Duration(seconds: 20))) {
+        size += line.length;
+        if (size > 2 * 1024 * 1024) throw const FormatException('连接测试响应过大');
+        if (aiStreamText(line, api: api)?.isNotEmpty == true) return const [];
       }
-      throw const FormatException('未收到流式模型回复');
+      throw const FormatException('未收到所选协议的流式模型回复');
     }
     final body = StringBuffer();
     await for (final text
@@ -86,7 +112,7 @@ Future<List<String>> checkAiEndpoint(
             .transform(utf8.decoder)
             .timeout(const Duration(seconds: 15))) {
       body.write(text);
-      if (body.length > 1024 * 1024) throw const FormatException('服务响应过大');
+      if (body.length > 1024 * 1024) throw const FormatException('模型列表过大');
     }
     final data = (jsonDecode(body.toString()) as Map)['data'] as List;
     return data

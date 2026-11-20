@@ -9,10 +9,19 @@ import 'ssh_connection.dart';
 class AgentRemote {
   const AgentRemote(
     this.connection, {
-    this.toolTimeout = const Duration(seconds: 25),
+    this.toolTimeout,
+    this.maxOutputBytes = 256 * 1024,
   });
   final SshConnection connection;
-  final Duration toolTimeout;
+  final Duration? toolTimeout;
+  final int maxOutputBytes;
+
+  void _terminate(SSHSession session) {
+    try {
+      session.kill(SSHSignal.TERM);
+    } catch (_) {}
+    session.channel.destroy();
+  }
 
   Future<String> execute(
     AgentToolRequest request,
@@ -22,41 +31,34 @@ class AgentRemote {
     final local = AgentCancellation();
     final unregisterParent = cancellation.onCancel(local.cancel);
     var timedOut = false;
-    final timer = Timer(toolTimeout, () {
-      timedOut = true;
-      local.cancel();
-    });
+    final timer = Timer(
+      toolTimeout ?? Duration(seconds: request.timeoutSeconds),
+      () {
+        timedOut = true;
+        local.cancel();
+      },
+    );
     final watch = Stopwatch()..start();
     final stdout = <int>[], stderr = <int>[];
     final subscriptions = <StreamSubscription<List<int>>>[];
     var bytes = 0;
     var truncated = false;
-    var streamError = false;
+    String? streamError, executionError;
+    String stage = 'opening_exec_channel';
     int? exitCode;
-    void Function()? close;
+    SSHSession? active;
     void Function()? unregister;
     try {
-      final pending = connection.executeDiagnostic(request);
+      final pending = connection.executeAgentCommand(request);
       unawaited(
         pending.then<void>((session) {
-          if (local.cancelled) {
-            try {
-              session.kill(SSHSignal.TERM);
-            } catch (_) {}
-            session.close();
-          }
+          if (local.cancelled) _terminate(session);
         }, onError: (Object _, StackTrace __) {}),
       );
       final session = await local.wait(pending);
-      close = session.close;
-      void terminate() {
-        try {
-          session.kill(SSHSignal.TERM);
-        } catch (_) {}
-        session.close();
-      }
-
-      unregister = local.onCancel(terminate);
+      active = session;
+      stage = 'running_command';
+      unregister = local.onCancel(() => _terminate(session));
       final done = <Future<void>>[];
       void listen(Stream<List<int>> stream, List<int> output) {
         final completer = Completer<void>();
@@ -64,12 +66,12 @@ class AgentRemote {
         subscriptions.add(
           stream.listen(
             (chunk) {
-              if (bytes + chunk.length > 24 * 1024) {
-                final remaining = 24 * 1024 - bytes;
+              final remaining = maxOutputBytes - bytes;
+              if (chunk.length > remaining) {
                 if (remaining > 0) output.addAll(chunk.take(remaining));
-                bytes = 24 * 1024;
+                bytes = maxOutputBytes;
                 truncated = true;
-                terminate();
+                _terminate(session);
               } else {
                 output.addAll(chunk);
                 bytes += chunk.length;
@@ -78,8 +80,8 @@ class AgentRemote {
             onDone: () {
               if (!completer.isCompleted) completer.complete();
             },
-            onError: (Object _) {
-              streamError = true;
+            onError: (Object error) {
+              streamError = error.toString();
               if (!completer.isCompleted) completer.complete();
             },
             cancelOnError: true,
@@ -89,15 +91,23 @@ class AgentRemote {
 
       listen(session.stdout, stdout);
       listen(session.stderr, stderr);
+      unawaited(
+        session.stdin.close().catchError((Object error) {
+          streamError = error.toString();
+        }),
+      );
       await local.wait(Future.wait(done));
       await local.wait(session.done);
       exitCode = session.exitCode;
+      stage = 'finished';
     } on AgentCancelled {
       cancellation.check();
       if (!timedOut) rethrow;
+    } catch (error) {
+      executionError = error.toString();
     } finally {
       timer.cancel();
-      close?.call();
+      if (active != null) active.channel.destroy();
       for (final subscription in subscriptions) {
         await subscription.cancel();
       }
@@ -109,16 +119,22 @@ class AgentRemote {
     cancellation.check();
     return jsonEncode({
       'command': request.command,
+      'working_directory': request.workingDirectory,
+      'stage': stage,
       'exit_code': exitCode,
       'stdout': utf8.decode(stdout, allowMalformed: true),
       'stderr': utf8.decode(stderr, allowMalformed: true),
       'elapsed_ms': watch.elapsedMilliseconds,
       'truncated': truncated,
       'timed_out': timedOut,
-      'stream_error': streamError,
-      if (timedOut || truncated || streamError)
+      if (streamError != null) 'stream_error': streamError,
+      if (executionError != null) 'error': executionError,
+      if (timedOut ||
+          truncated ||
+          executionError != null ||
+          streamError != null)
         'note':
-            'Output may be incomplete. The execution channel was closed; remote process termination is not confirmed.',
+            'Output may be incomplete. Remote process termination is not confirmed; verify state before retrying a change.',
     });
   }
 }

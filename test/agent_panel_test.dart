@@ -25,19 +25,17 @@ void main() {
         ),
       ),
     );
-    expect(find.text('SSH 运维 Agent'), findsOneWidget);
+    expect(find.text('AI 终端'), findsOneWidget);
     expect(find.textContaining('My server'), findsOneWidget);
-    expect(find.textContaining('自动诊断'), findsWidgets);
-    expect(find.text('开始诊断'), findsOneWidget);
-    expect(find.textContaining('点击开始后自动执行'), findsOneWidget);
+    expect(find.text('发送'), findsOneWidget);
+    expect(find.textContaining('上下文'), findsWidgets);
     expect(find.byType(AlertDialog), findsNothing);
-    expect(find.widgetWithText(TextField, '/var'), findsOneWidget);
-    await tester.tap(find.text('磁盘诊断'));
+    expect(find.text('磁盘诊断'), findsNothing);
+    await tester.tap(find.text('审查模式'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('服务诊断').last);
+    await tester.tap(find.text('危险模式').last);
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'nginx'), findsOneWidget);
-    expect(find.text('systemd 服务'), findsOneWidget);
+    expect(find.textContaining('自动执行命令，可修改主机'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     session.dispose();
     store.dispose();

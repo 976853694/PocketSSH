@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/agent_controller.dart';
 import '../../core/agent_policy.dart';
+import '../../core/agent_protocol.dart';
 import '../../core/agent_remote.dart';
 import '../../core/agent_transport.dart';
 import '../../core/ai_endpoint.dart';
@@ -27,99 +28,175 @@ class AiAgentPanel extends StatefulWidget {
 class _AiAgentPanelState extends State<AiAgentPanel> {
   final question = TextEditingController();
   final contextText = TextEditingController();
-  final targetText = TextEditingController(text: '/var');
-  AgentTaskKind taskKind = AgentTaskKind.disk;
   late final SshConnection connection = widget.session.connection;
   late final AgentController agent;
+  AgentMode mode = AgentMode.review;
   AgentTransport? transport;
-  bool preparing = false;
-  String? localError;
-  String? configuration;
-
+  AgentCancellation? preparing;
+  String? localError, configuration;
   bool get current =>
       widget.session.connected &&
       identical(connection, widget.session.connection);
-
+  String get target => SshTarget(
+    widget.session.profile.host,
+    widget.session.profile.port,
+    widget.session.profile.username,
+  ).label;
   @override
   void initState() {
     super.initState();
-    final initial = redactSecrets(widget.selection);
-    contextText.text = initial.substring(0, initial.length.clamp(0, 12000));
+    contextText.text = redactSecrets(widget.selection);
     agent = AgentController(
-      requestModel: (messages, cancellation, onText) =>
-          transport!.request(messages, cancellation, onText),
-      executeTool: AgentRemote(connection).execute,
+      requestModel: (messages, cancel, onText) =>
+          transport!.request(messages, cancel, onText),
+      requestSummary: (messages, cancel, onText) => transport!.request(
+        messages,
+        cancel,
+        onText,
+        toolsEnabled: false,
+        outputTokens: (widget.store.aiMaxOutputTokens ~/ 2).clamp(256, 2048),
+      ),
+      executeTool: (request, cancel) => AgentRemote(
+        connection,
+        maxOutputBytes: (widget.store.aiBudget.inputLimit * 2).clamp(
+          8192,
+          256 * 1024,
+        ),
+      ).execute(request, cancel),
       connectionIsCurrent: () => current,
+      approve: approve,
     );
     widget.session.addListener(connectionChanged);
   }
 
+  void stop() {
+    preparing?.cancel();
+    agent.stop();
+  }
+
   void connectionChanged() {
-    if (!current) agent.stop();
+    if (!current) stop();
     if (mounted) setState(() {});
   }
 
-  Future<void> send() async {
-    if (preparing || agent.running) return;
-    if (!current) {
-      setState(() => localError = '请先重新连接 SSH，再打开 Agent');
-      return;
-    }
-    final endpoint = chatEndpoint(widget.store.aiEndpoint);
-    final model = widget.store.aiModel.trim();
-    if (endpoint == null || model.isEmpty) {
-      setState(() => localError = '请在设置中填写 AI 服务地址和模型');
-      return;
-    }
-    late final AgentPolicy policy;
+  Future<bool> approve(
+    AgentToolRequest request,
+    AgentCancellation cancellation,
+  ) async {
+    if (!mounted || !current || cancellation.cancelled) return false;
+    final route = DialogRoute<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('审查终端命令'),
+        content: SizedBox(
+          width: 600,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('目标：$target'),
+                const SizedBox(height: 8),
+                Text(request.purpose),
+                Text(
+                  '工作目录：${request.workingDirectory.isEmpty ? '登录目录' : request.workingDirectory} · 超时 ${request.timeoutSeconds} 秒',
+                ),
+                const SizedBox(height: 12),
+                SelectableText(
+                  request.command,
+                  style: const TextStyle(fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('拒绝并停止'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('批准执行'),
+          ),
+        ],
+      ),
+    );
+    final navigator = Navigator.of(context, rootNavigator: true);
+    final unregister = cancellation.onCancel(() {
+      if (route.isActive) navigator.removeRoute(route, false);
+    });
     try {
-      policy = AgentPolicy(kind: taskKind, target: targetText.text.trim());
-    } on FormatException catch (error) {
-      setState(() => localError = error.message);
+      cancellation.check();
+      final approved = await navigator.push(route);
+      return approved == true && mounted && current && !cancellation.cancelled;
+    } finally {
+      unregister();
+    }
+  }
+
+  Future<void> send() async {
+    if (preparing != null || agent.running) return;
+    final task = question.text.trim();
+    if (task.isEmpty) return;
+    final endpoint = aiEndpoint(widget.store.aiEndpoint, widget.store.aiApi);
+    if (endpoint == null || widget.store.aiModel.trim().isEmpty) {
+      setState(() => localError = '请在设置中填写网站地址、接口类型和模型');
       return;
     }
-    final task = question.text.trim().isEmpty
-        ? '请完成${policy.description}，给出结论、证据和处理建议。'
-        : question.text.trim();
-    final suppliedContext = contextText.text;
+    final cancel = AgentCancellation();
     setState(() {
-      preparing = true;
+      preparing = cancel;
       localError = null;
     });
     try {
-      if (!await widget.store.unlock() || !mounted || !current) return;
-      final key = await widget.store.secret('ai:$endpoint');
-      if (!mounted || !current) return;
-      final selectedConfiguration = '$endpoint\n$model';
-      if (configuration != null && configuration != selectedConfiguration) {
-        agent.clear();
-      }
-      configuration = selectedConfiguration;
+      final budget = widget.store.aiBudget;
+      if (!await cancel.wait(widget.store.unlock()) || !mounted) return;
+      final key = await cancel.wait(
+        widget.store.aiSecret(widget.store.aiEndpoint),
+      );
+      if (!mounted) return;
+      cancel.check();
+      final selected =
+          '$endpoint\n${widget.store.aiModel}\n${budget.contextTokens}\n${budget.maxOutputTokens}';
+      if (configuration != null && configuration != selected) agent.clear();
+      configuration = selected;
       transport = AgentTransport(
         endpoint: endpoint,
-        model: model,
+        model: widget.store.aiModel.trim(),
         apiKey: key,
-        tools: policy.tools,
+        api: widget.store.aiApi,
+        maxOutputTokens: budget.maxOutputTokens,
       );
+      final supplied = contextText.text;
       question.clear();
       contextText.clear();
-      setState(() => preparing = false);
-      await agent.send(task, policy: policy, context: suppliedContext);
-    } catch (_) {
-      if (mounted) setState(() => localError = '无法读取 AI 密钥，请检查设备认证和服务设置');
+      setState(() => preparing = null);
+      await agent.send(
+        task,
+        policy: AgentPolicy(mode: mode),
+        budget: budget,
+        context: supplied,
+        modelName: widget.store.aiModel,
+        target: target,
+      );
+    } on AgentCancelled {
+      /* A cancelled unlock must never start a command. */
+    } catch (error) {
+      if (mounted) setState(() => localError = redactSecrets(error.toString()));
     } finally {
       transport = null;
-      if (mounted) setState(() => preparing = false);
+      if (mounted) setState(() => preparing = null);
     }
   }
 
   @override
   void dispose() {
     widget.session.removeListener(connectionChanged);
+    stop();
     agent.dispose();
     question.dispose();
     contextText.dispose();
-    targetText.dispose();
     super.dispose();
   }
 
@@ -127,11 +204,11 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: agent,
     builder: (context, _) {
-      final busy = agent.running || preparing;
+      final busy = agent.running || preparing != null;
       final colors = Theme.of(context).colorScheme;
       return SafeArea(
         child: SizedBox(
-          height: MediaQuery.sizeOf(context).height * .92,
+          height: MediaQuery.sizeOf(context).height * .94,
           child: Padding(
             padding: EdgeInsets.only(
               bottom: MediaQuery.viewInsetsOf(context).bottom,
@@ -139,8 +216,8 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.auto_awesome),
-                  title: const Text('SSH 运维 Agent'),
+                  leading: const Icon(Icons.terminal),
+                  title: const Text('AI 终端'),
                   subtitle: Text(
                     '${widget.session.profile.name} · ${agent.status}',
                   ),
@@ -156,62 +233,50 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Text(
-                    '${widget.store.aiModel} · 自动诊断 · 最长 3 分钟 / 12 次工具调用',
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
-                      DropdownButton<AgentTaskKind>(
-                        value: taskKind,
+                      Expanded(
+                        child: Text(
+                          '${widget.store.aiModel} · ${widget.store.aiApi == AiApi.chat ? 'Chat' : 'Responses'}',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      ),
+                      DropdownButton<AgentMode>(
+                        value: mode,
                         items: const [
                           DropdownMenuItem(
-                            value: AgentTaskKind.disk,
-                            child: Text('磁盘诊断'),
+                            value: AgentMode.review,
+                            child: Text('审查模式'),
                           ),
                           DropdownMenuItem(
-                            value: AgentTaskKind.service,
-                            child: Text('服务诊断'),
+                            value: AgentMode.dangerous,
+                            child: Text('危险模式'),
                           ),
                         ],
                         onChanged: busy
                             ? null
                             : (value) {
-                                if (value == null) return;
-                                setState(() {
-                                  taskKind = value;
-                                  targetText.text = value == AgentTaskKind.disk
-                                      ? '/var'
-                                      : 'nginx';
-                                });
+                                if (value != null) setState(() => mode = value);
                               },
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextField(
-                          controller: targetText,
-                          enabled: !busy,
-                          decoration: InputDecoration(
-                            labelText: taskKind == AgentTaskKind.disk
-                                ? '诊断目录（含子目录）'
-                                : 'systemd 服务',
-                            isDense: true,
-                          ),
-                        ),
                       ),
                     ],
                   ),
                 ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Text(
-                    '目标：${SshTarget(widget.session.profile.host, widget.session.profile.port, widget.session.profile.username).label}\n'
-                    '点击开始后自动执行范围内检查，结果脱敏后发送至 ${chatEndpoint(widget.store.aiEndpoint)?.host ?? "设置中的 AI 服务"} 分析（脱敏可能不完整）。',
-                    style: Theme.of(context).textTheme.labelSmall,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '目标：$target${current ? '' : '（SSH 未连接）'}\n'
+                      '${mode == AgentMode.dangerous ? '自动执行命令，可修改主机。' : '命令执行前由你审查。'}结果会发送至 ${aiBaseUrl(widget.store.aiEndpoint)?.host ?? '配置的 AI 服务'}。\n'
+                      '上下文 ${agent.usageEstimated ? '估算 ' : ''}${agent.contextTokens}/${widget.store.aiContextTokens} tokens · 已压缩 ${agent.compressionCount} 次',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: mode == AgentMode.dangerous
+                            ? colors.error
+                            : null,
+                      ),
+                    ),
                   ),
                 ),
                 if (busy) const LinearProgressIndicator(minHeight: 2),
@@ -221,9 +286,9 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                     children: [
                       if (agent.events.isEmpty)
                         const Padding(
-                          padding: EdgeInsets.all(16),
+                          padding: EdgeInsets.all(12),
                           child: Text(
-                            '选择诊断类型和目标，点击开始诊断。Agent 会自动执行基础检查，并根据输出继续排查，直到形成报告。\n\n磁盘：容量、inode 和目录占用；服务：systemd 状态和最近日志。执行过程可展开查看，对话保留在当前面板。',
+                            '描述你要完成的任务。Agent 会按需执行命令、读取结果并继续操作。也可以直接聊天。\n\n每条命令使用独立 Shell，可指定工作目录；不会混入你正在输入的交互终端。',
                           ),
                         ),
                       for (final event in agent.events)
@@ -240,14 +305,26 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                                     subtitle: Text(
                                       event.text.split('\n').first,
                                     ),
-                                    children: [SelectableText(event.text)],
+                                    children: [
+                                      SelectableText(
+                                        event.text,
+                                        style: const TextStyle(
+                                          fontFamily: 'monospace',
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    ],
                                   )
                                 : Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        event.kind == 'user' ? '你' : 'Agent',
+                                        event.kind == 'user'
+                                            ? '你'
+                                            : event.kind == 'context'
+                                            ? event.status
+                                            : 'Agent',
                                         style: Theme.of(
                                           context,
                                         ).textTheme.labelSmall,
@@ -277,31 +354,33 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                           ),
                         ),
                       if (localError ?? agent.error case final error?)
-                        Text(error, style: TextStyle(color: colors.error)),
+                        SelectableText(
+                          error,
+                          style: TextStyle(color: colors.error),
+                        ),
                     ],
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: ExpansionTile(
-                    title: const Text('本次附加上下文（发送前核对）'),
+                    title: const Text('附加上下文'),
                     initiallyExpanded: contextText.text.isNotEmpty,
                     children: [
                       TextField(
                         controller: contextText,
                         enabled: !busy,
-                        maxLength: 12000,
-                        minLines: 2,
-                        maxLines: 4,
+                        minLines: 1,
+                        maxLines: 3,
                         decoration: const InputDecoration(
-                          hintText: '仅发送你填写或选中的内容',
+                          hintText: '选中的终端内容或任务相关日志',
                         ),
                       ),
                     ],
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -311,26 +390,16 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                           enabled: !busy,
                           minLines: 1,
                           maxLines: 4,
-                          maxLength: 4000,
                           decoration: const InputDecoration(
-                            hintText: '补充任务或继续追问（可留空）',
+                            hintText: '输入任务或继续追问',
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 24),
-                        child: FilledButton.icon(
-                          onPressed: preparing
-                              ? null
-                              : agent.running
-                              ? agent.stop
-                              : send,
-                          icon: Icon(
-                            agent.running ? Icons.stop : Icons.arrow_upward,
-                          ),
-                          label: Text(agent.running ? '停止' : '开始诊断'),
-                        ),
+                      FilledButton.icon(
+                        onPressed: busy ? stop : send,
+                        icon: Icon(busy ? Icons.stop : Icons.arrow_upward),
+                        label: Text(busy ? '停止' : '发送'),
                       ),
                     ],
                   ),

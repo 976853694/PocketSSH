@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'device_bridge.dart';
+import 'ai_endpoint.dart';
+import 'agent_context.dart';
 
 class HostProfile {
   HostProfile({
@@ -92,6 +94,14 @@ class AppStore extends ChangeNotifier {
       terminalTheme = 'dark',
       aiEndpoint = '',
       aiModel = '';
+  AiApi aiApi = AiApi.chat;
+  int aiContextTokens = 65536, aiMaxOutputTokens = 8192;
+  double aiCompressionThreshold = .75;
+  AgentBudget get aiBudget => AgentBudget(
+    contextTokens: aiContextTokens,
+    maxOutputTokens: aiMaxOutputTokens,
+    compressionThreshold: aiCompressionThreshold,
+  );
   double fontSize = 14;
   int scrollback = 5000;
   bool keepAwake = false, deviceLock = false, recentCommandHistory = false;
@@ -115,6 +125,18 @@ class AppStore extends ChangeNotifier {
         terminalTheme = j['terminalTheme'] as String? ?? 'dark';
         aiEndpoint = j['aiEndpoint'] as String? ?? '';
         aiModel = j['aiModel'] as String? ?? '';
+        aiApi = j['aiApi'] == 'responses' ? AiApi.responses : AiApi.chat;
+        aiContextTokens = j['aiContextTokens'] as int? ?? 65536;
+        aiMaxOutputTokens = j['aiMaxOutputTokens'] as int? ?? 8192;
+        aiCompressionThreshold =
+            (j['aiCompressionThreshold'] as num?)?.toDouble() ?? .75;
+        try {
+          aiBudget;
+        } on FormatException {
+          aiContextTokens = 65536;
+          aiMaxOutputTokens = 8192;
+          aiCompressionThreshold = .75;
+        }
         fontSize = (j['fontSize'] as num?)?.toDouble() ?? 14;
         scrollback = j['scrollback'] as int? ?? 5000;
         keepAwake = j['keepAwake'] == true;
@@ -143,6 +165,10 @@ class AppStore extends ChangeNotifier {
         'recentCommandHistory': recentCommandHistory,
         'aiEndpoint': aiEndpoint,
         'aiModel': aiModel,
+        'aiApi': aiApi.name,
+        'aiContextTokens': aiContextTokens,
+        'aiMaxOutputTokens': aiMaxOutputTokens,
+        'aiCompressionThreshold': aiCompressionThreshold,
       }),
     );
     notifyListeners();
@@ -155,6 +181,22 @@ class AppStore extends ChangeNotifier {
       _device.invokeMethod<String>('readSecret', key);
   Future<void> putSecret(String key, String? value) =>
       _device.invokeMethod<void>('writeSecret', {'key': key, 'value': value});
+  Future<String?> aiSecret(String input) async {
+    final base = aiBaseUrl(input);
+    if (base == null) return null;
+    for (final address in {
+      base.toString(),
+      aiEndpoint,
+      chatEndpoint(input).toString(),
+      base.replace(path: '${base.path}/v1/responses').toString(),
+    }) {
+      if (aiBaseUrl(address) != base) continue;
+      final value = await secret('ai:$address');
+      if (value != null) return value;
+    }
+    return null;
+  }
+
   Future<Credentials?> credentials(
     HostProfile host, {
     bool authenticate = true,

@@ -107,17 +107,9 @@ class SshConnection {
     }
   }
 
-  Future<SSHSession> executeDiagnostic(AgentToolRequest request) {
+  Future<SSHSession> executeAgentCommand(AgentToolRequest request) {
     if (_closed || _client == null) throw StateError('SSH 会话已断开');
-    return _client!.execute(
-      request.command,
-      environment: const {
-        'TERM': 'dumb',
-        'SYSTEMD_PAGER': '',
-        'SYSTEMD_COLORS': '0',
-        'LC_ALL': 'C',
-      },
-    );
+    return _client!.execute(request.shellCommand);
   }
 
   Future<SftpClient> sftp() => _client!.sftp();

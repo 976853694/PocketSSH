@@ -34,15 +34,46 @@ void main() {
     await tester.tap(find.text('设置'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
-      find.text('AI 助手'),
+      find.text('AI 终端'),
       100,
-      scrollable: find.byType(Scrollable).last,
+      scrollable: find
+          .byWidgetPredicate(
+            (widget) =>
+                widget is Scrollable &&
+                widget.axisDirection == AxisDirection.down,
+          )
+          .last,
     );
-    expect(find.text('AI 助手'), findsOneWidget);
+    expect(find.text('AI 终端'), findsOneWidget);
+    final vertical = find
+        .byWidgetPredicate(
+          (widget) =>
+              widget is Scrollable &&
+              widget.axisDirection == AxisDirection.down,
+        )
+        .last;
+    await tester.scrollUntilVisible(
+      find.text('接口类型'),
+      150,
+      scrollable: vertical,
+    );
+    await tester.ensureVisible(find.text('Chat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Chat'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Responses').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Responses'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('终端字体大小'),
-      100,
-      scrollable: find.byType(Scrollable).last,
+      -200,
+      scrollable: find
+          .byWidgetPredicate(
+            (widget) =>
+                widget is Scrollable &&
+                widget.axisDirection == AxisDirection.down,
+          )
+          .last,
     );
     expect(find.text('终端字体大小'), findsOneWidget);
     sessions.dispose();
