@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/services.dart';
+import 'agent_protocol.dart';
 
 class SshTarget {
   const SshTarget(this.host, this.port, this.username);
@@ -104,6 +105,13 @@ class SshConnection {
       close();
       rethrow;
     }
+  }
+
+  Future<SSHSession> executeDiagnostic(String check) {
+    final command = diagnosticCommands[check];
+    if (_closed || _client == null) throw StateError('SSH 会话已断开');
+    if (command == null) throw const FormatException('诊断项目不受支持');
+    return _client!.execute(command, environment: const {'TERM': 'dumb'});
   }
 
   Future<SftpClient> sftp() => _client!.sftp();

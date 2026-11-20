@@ -38,7 +38,6 @@ class _TerminalPageState extends State<TerminalPage> {
   final searchField = TextEditingController();
   WorkspaceSession get session => widget.session;
   String draft = '';
-  bool _aiDraft = false;
   bool _confirmingDraft = false;
   bool search = false;
   List<TerminalSearchMatch> matches = [];
@@ -220,17 +219,10 @@ class _TerminalPageState extends State<TerminalPage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (_) => AiPanel(
+      builder: (_) => AiAgentPanel(
         store: widget.store,
+        session: session,
         selection: contextText,
-        onReview: session.connected
-            ? (value) => unawaited(_reviewAiCommand(value))
-            : null,
-        onDraft: (value) {
-          _aiDraft = true;
-          draftController.text = value;
-          _notice('AI 建议已放入命令草稿；检查后手动发送。');
-        },
       ),
     );
   }
@@ -584,7 +576,6 @@ class _TerminalPageState extends State<TerminalPage> {
                         isDense: true,
                         suffixIcon: IconButton(
                           onPressed: () {
-                            _aiDraft = false;
                             draftController.clear();
                           },
                           icon: const Icon(Icons.close),
@@ -644,82 +635,10 @@ class _TerminalPageState extends State<TerminalPage> {
     );
   }
 
-  Future<void> _reviewAiCommand(String suggestion) async {
-    if (_confirmingDraft || !session.connected) return;
-    final connection = session.connection;
-    final profile = session.profile;
-    final target = SshTarget(
-      profile.host,
-      profile.port,
-      profile.username,
-    ).label;
-    var command = suggestion;
-    _confirmingDraft = true;
-    try {
-      final approved = await showDialog<String>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, update) => AlertDialog(
-            title: const Text('审阅并执行'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('目标会话 · $target'),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    initialValue: suggestion,
-                    minLines: 1,
-                    maxLines: 8,
-                    autocorrect: false,
-                    style: const TextStyle(fontFamily: 'monospace'),
-                    decoration: const InputDecoration(labelText: '完整命令'),
-                    onChanged: (value) => update(() => command = value),
-                  ),
-                  if (isHighRiskCommand(command) ||
-                      command.contains('\n') ||
-                      command.contains('\r'))
-                    const Text('高风险操作或多行命令，请核对每一行及其影响。'),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: command.trim().isEmpty
-                    ? null
-                    : () => Navigator.pop(context, command),
-                child: const Text('执行'),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (!mounted ||
-          approved == null ||
-          !session.connected ||
-          !identical(connection, session.connection)) {
-        return;
-      }
-      _writeConfirmedCommand(approved);
-      _notice('命令已发送，执行结果请查看当前终端。');
-    } finally {
-      _confirmingDraft = false;
-    }
-  }
-
   Future<void> _sendDraft(String value) async {
     if (_confirmingDraft || !session.connected || value.trim().isEmpty) return;
-    final fromAssistant = _aiDraft;
     final highRisk = isHighRiskCommand(value);
-    if (fromAssistant ||
-        highRisk ||
-        value.contains('\n') ||
-        value.contains('\r')) {
+    if (highRisk || value.contains('\n') || value.contains('\r')) {
       final connection = session.connection;
       final target = session.profile;
       final targetLabel = SshTarget(
@@ -768,7 +687,6 @@ class _TerminalPageState extends State<TerminalPage> {
       }
     }
     _writeConfirmedCommand(value);
-    _aiDraft = false;
     draftController.clear();
   }
 
