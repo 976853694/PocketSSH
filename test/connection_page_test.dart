@@ -19,6 +19,10 @@ void main() {
   testWidgets(
     'home exposes host, session and file navigation with settings categories',
     (tester) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       final store = AppStore();
       final sessions = Sessions();
       await tester.pumpWidget(
@@ -30,13 +34,15 @@ void main() {
       expect(find.text('主机'), findsOneWidget);
       expect(find.text('会话'), findsOneWidget);
       expect(find.text('文件'), findsOneWidget);
-      expect(find.text('添加第一台服务器'), findsOneWidget);
+      expect(find.text('你的服务器，随时就绪。'), findsOneWidget);
+      expect(find.text('快速连接'), findsOneWidget);
       await tester.tap(find.text('文件'));
       await tester.pumpAndSettle();
-      expect(find.text('SFTP 传输'), findsNothing);
+      expect(find.text('SFTP WORKSPACE'), findsOneWidget);
+      expect(find.text('选择主机，浏览和传输远程文件。'), findsOneWidget);
       await tester.tap(find.text('主机'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('设置'));
+      await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
       expect(find.text('外观'), findsOneWidget);
       expect(find.text('终端'), findsOneWidget);
@@ -61,6 +67,36 @@ void main() {
       store.dispose();
     },
   );
+
+  testWidgets('host list action buttons fit on a narrow screen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AppStore()
+      ..hosts.add(
+        HostProfile(
+          id: 'prod',
+          name: 'Production API Server',
+          host: 'api.example.test',
+          username: 'operator',
+          group: 'Production',
+        ),
+      );
+    final sessions = Sessions();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    expect(find.text('Production API Server'), findsOneWidget);
+    expect(find.byTooltip('连接 Production API Server'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    sessions.dispose();
+    store.dispose();
+  });
 
   testWidgets('host profile form exposes connection and jump-host fields', (
     tester,

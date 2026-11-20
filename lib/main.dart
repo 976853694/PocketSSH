@@ -79,11 +79,11 @@ class _PocketSshAppState extends State<PocketSshApp> {
 
   ThemeData _theme(Brightness brightness) {
     final colors = ColorScheme.fromSeed(
-      seedColor: const Color(0xff087f68),
+      seedColor: const Color(0xff16b995),
       brightness: brightness,
       surface: brightness == Brightness.dark
-          ? const Color(0xff11171f)
-          : const Color(0xfff5f7f7),
+          ? const Color(0xff10171d)
+          : const Color(0xfff4f7f8),
     );
     final fieldBorder = OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
@@ -95,9 +95,7 @@ class _PocketSshAppState extends State<PocketSshApp> {
       scaffoldBackgroundColor: colors.surface,
       appBarTheme: AppBarTheme(
         backgroundColor: colors.surface.withValues(
-          alpha: store.glassStyle == 'solid'
-              ? 1
-              : store.glassOpacity.clamp(.35, .9),
+          alpha: store.glassStyle == 'solid' ? 1 : .94,
         ),
         surfaceTintColor: Colors.transparent,
         foregroundColor: colors.onSurface,
@@ -571,21 +569,28 @@ class _PocketHomeState extends State<PocketHome> {
           floating: true,
           title: const Text(
             'Pocket SSH',
-            style: TextStyle(fontWeight: FontWeight.w700),
+            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.3),
           ),
           actions: [
-            TextButton(onPressed: openSettings, child: const Text('设置')),
             IconButton(
-              onPressed: () => edit(null, true),
-              tooltip: '快速连接',
-              icon: const Icon(Icons.bolt_outlined),
-            ),
-            IconButton(
-              onPressed: () => edit(),
-              tooltip: '添加主机',
-              icon: const Icon(Icons.add),
+              onPressed: openSettings,
+              tooltip: '设置',
+              icon: const Icon(Icons.settings_outlined),
             ),
           ],
+        ),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+          sliver: SliverToBoxAdapter(
+            child: _WorkspaceHero(
+              hostCount: widget.store.hosts.length,
+              sessionCount: widget.sessions.items
+                  .where((session) => session.connected)
+                  .length,
+              onQuickConnect: () => edit(null, true),
+              onAddHost: () => edit(),
+            ),
+          ),
         ),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
@@ -602,7 +607,13 @@ class _PocketHomeState extends State<PocketHome> {
         if (hosts.isEmpty)
           SliverFillRemaining(
             hasScrollBody: false,
-            child: _EmptyState(onAdd: () => edit()),
+            child: _EmptyStateMessage(
+              icon: filter.isEmpty ? Icons.dns_outlined : Icons.search_off,
+              title: filter.isEmpty ? '还没有保存主机' : '没有找到匹配主机',
+              message: filter.isEmpty
+                  ? '使用上方的快速连接，或添加一台服务器开始工作。'
+                  : '试试更短的名称、地址或分组关键字。',
+            ),
           )
         else
           for (final group in groups) ...[
@@ -623,9 +634,12 @@ class _PocketHomeState extends State<PocketHome> {
                         )
                         .toList();
                     final host = rows[index];
-                    return GlassSurface(
-                      store: widget.store,
+                    final activeSession = widget.sessions.items
+                        .where((session) => session.profile.id == host.id)
+                        .firstOrNull;
+                    return Card(
                       margin: const EdgeInsets.symmetric(vertical: 4),
+                      clipBehavior: Clip.antiAlias,
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
@@ -647,39 +661,73 @@ class _PocketHomeState extends State<PocketHome> {
                             color: Theme.of(context).colorScheme.primary,
                           ),
                         ),
-                        title: Text(
-                          host.name,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        title: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                host.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            if (activeSession != null) ...[
+                              const SizedBox(width: 8),
+                              _StatusBadge(
+                                label: activeSession.connected ? '在线' : '连接中',
+                                active: activeSession.connected,
+                              ),
+                            ],
+                          ],
                         ),
                         subtitle: Text(
                           '${host.username}@${host.host}:${host.port}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         onTap: () => connect(host),
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (value) {
-                            if (value == 'edit') edit(host);
-                            if (value == 'sftp') connect(host, sftp: true);
-                            if (value == 'credentials') {
-                              connect(host, replaceCredentials: true);
-                            }
-                            if (value == 'delete') removeHost(host);
-                            if (value == 'trust') forgetTrust(host);
-                          },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'edit', child: Text('编辑')),
-                            PopupMenuItem(
-                              value: 'sftp',
-                              child: Text('打开 SFTP'),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton.filledTonal(
+                              tooltip: '连接 ${host.name}',
+                              onPressed: connecting
+                                  ? null
+                                  : () => connect(host),
+                              icon: const Icon(Icons.terminal),
                             ),
-                            PopupMenuItem(
-                              value: 'credentials',
-                              child: Text('更换登录凭据'),
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') edit(host);
+                                if (value == 'sftp') connect(host, sftp: true);
+                                if (value == 'credentials') {
+                                  connect(host, replaceCredentials: true);
+                                }
+                                if (value == 'delete') removeHost(host);
+                                if (value == 'trust') forgetTrust(host);
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(value: 'edit', child: Text('编辑')),
+                                PopupMenuItem(
+                                  value: 'sftp',
+                                  child: Text('打开 SFTP'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'credentials',
+                                  child: Text('更换登录凭据'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'trust',
+                                  child: Text('重新核对指纹'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('删除'),
+                                ),
+                              ],
                             ),
-                            PopupMenuItem(
-                              value: 'trust',
-                              child: Text('重新核对指纹'),
-                            ),
-                            PopupMenuItem(value: 'delete', child: Text('删除')),
                           ],
                         ),
                       ),
@@ -725,7 +773,7 @@ class _PocketHomeState extends State<PocketHome> {
     slivers: [
       SliverAppBar(
         floating: true,
-        title: const Text('会话'),
+        title: const Text('Pocket SSH'),
         actions: [
           IconButton(
             tooltip: '设置',
@@ -735,29 +783,14 @@ class _PocketHomeState extends State<PocketHome> {
         ],
       ),
       SliverPadding(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
         sliver: SliverToBoxAdapter(
-          child: GlassSurface(
-            store: widget.store,
-            padding: const EdgeInsets.all(18),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.terminal,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    '活动 SSH 会话',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Text('${widget.sessions.items.length} 个'),
-              ],
-            ),
+          child: _PageIntro(
+            eyebrow: 'LIVE CONNECTIONS',
+            title: '会话',
+            subtitle: '管理正在运行的 SSH 终端。',
+            trailing:
+                '${widget.sessions.items.where((s) => s.connected).length} 在线',
           ),
         ),
       ),
@@ -776,14 +809,16 @@ class _PocketHomeState extends State<PocketHome> {
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((context, index) {
               final session = widget.sessions.items[index];
-              return GlassSurface(
-                store: widget.store,
+              return Card(
                 margin: const EdgeInsets.only(bottom: 10),
+                clipBehavior: Clip.antiAlias,
                 child: ListTile(
                   leading: Icon(
                     Icons.circle,
                     size: 12,
-                    color: session.connected ? Colors.green : Colors.amber,
+                    color: session.connected
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.error,
                   ),
                   title: Text(session.profile.name),
                   subtitle: Text(session.status),
@@ -801,7 +836,7 @@ class _PocketHomeState extends State<PocketHome> {
     slivers: [
       SliverAppBar(
         floating: true,
-        title: const Text('文件'),
+        title: const Text('Pocket SSH'),
         actions: [
           IconButton(
             tooltip: '设置',
@@ -810,27 +845,44 @@ class _PocketHomeState extends State<PocketHome> {
           ),
         ],
       ),
+      SliverPadding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+        sliver: SliverToBoxAdapter(
+          child: _PageIntro(
+            eyebrow: 'SFTP WORKSPACE',
+            title: '文件',
+            subtitle: '选择主机，浏览和传输远程文件。',
+            trailing: '${widget.store.hosts.length} 主机',
+          ),
+        ),
+      ),
       if (connecting)
         const SliverToBoxAdapter(child: LinearProgressIndicator()),
       for (final host in widget.store.hosts)
-        SliverToBoxAdapter(
-          child: ListTile(
-            leading: const Icon(Icons.folder_open_outlined),
-            title: Text(host.name),
-            subtitle: Text(
-              SshTarget(host.host, host.port, host.username).label,
+        SliverPadding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+          sliver: SliverToBoxAdapter(
+            child: Card(
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                leading: const Icon(Icons.folder_open_outlined),
+                title: Text(host.name),
+                subtitle: Text(
+                  SshTarget(host.host, host.port, host.username).label,
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: connecting ? null : () => connect(host, sftp: true),
+              ),
             ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: connecting ? null : () => connect(host, sftp: true),
           ),
         ),
       if (widget.sessions.items.isEmpty && widget.store.hosts.isEmpty)
         const SliverFillRemaining(
           hasScrollBody: false,
           child: _EmptyStateMessage(
-            icon: Icons.swap_vert,
-            title: '还没有活动会话',
-            message: '连接主机后即可通过 SFTP 管理文件。',
+            icon: Icons.folder_open_outlined,
+            title: '还没有文件会话',
+            message: '添加主机后，从上方列表打开 SFTP。',
           ),
         )
       else
@@ -838,9 +890,9 @@ class _PocketHomeState extends State<PocketHome> {
           delegate: SliverChildBuilderDelegate((context, index) {
             final session = widget.sessions.items[index];
             final failed = session.transferStatus == '传输失败';
-            return GlassSurface(
-              store: widget.store,
+            return Card(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+              clipBehavior: Clip.antiAlias,
               child: ListTile(
                 leading: Icon(
                   Icons.folder_open_outlined,
@@ -1201,112 +1253,100 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _settingsFrame(String title, List<Widget> children) => Scaffold(
-    backgroundColor: Colors.transparent,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     appBar: AppBar(
       title: Text(title),
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
     ),
-    body: Stack(
-      children: [
-        Positioned.fill(child: GlassBackdrop(store: widget.store)),
-        SafeArea(
-          top: false,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                children: children,
-              ),
-            ),
+    body: SafeArea(
+      top: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: children,
           ),
         ),
-      ],
+      ),
     ),
   );
 
   Widget _settingsHome() => Scaffold(
-    backgroundColor: Colors.transparent,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     appBar: AppBar(
       title: const Text('设置'),
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
     ),
-    body: Stack(
-      children: [
-        Positioned.fill(child: GlassBackdrop(store: widget.store)),
-        SafeArea(
-          top: false,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 16),
-                    child: Text(
-                      '自定义 Pocket SSH 的外观、终端与连接体验。',
-                      style: Theme.of(context).textTheme.bodyLarge,
-                    ),
-                  ),
-                  _SettingsEntry(
-                    store: widget.store,
-                    icon: Icons.palette_outlined,
-                    title: '外观',
-                    subtitle: '主题、液态玻璃与透明度',
-                    onTap: () => openSection('appearance'),
-                  ),
-                  _SettingsEntry(
-                    store: widget.store,
-                    icon: Icons.terminal,
-                    title: '终端',
-                    subtitle: '字体、配色、命令历史与屏幕常亮',
-                    onTap: () => openSection('terminal'),
-                  ),
-                  _SettingsEntry(
-                    store: widget.store,
-                    icon: Icons.auto_awesome_outlined,
-                    title: 'AI 助手',
-                    subtitle: widget.store.aiEndpoint.isEmpty
-                        ? '配置模型与接口'
-                        : '${widget.store.aiChannelLabel} · ${widget.store.aiModel}',
-                    onTap: () => openSection('ai'),
-                  ),
-                  _SettingsEntry(
-                    store: widget.store,
-                    icon: Icons.shield_outlined,
-                    title: '安全与隐私',
-                    subtitle: '凭据保存与设备认证',
-                    onTap: () => openSection('security'),
-                  ),
-                  _SettingsEntry(
-                    store: widget.store,
-                    icon: Icons.import_export,
-                    title: '配置备份',
-                    subtitle: '导入或导出主机配置',
-                    onTap: () => openSection('backup'),
-                  ),
-                  _SettingsEntry(
-                    store: widget.store,
-                    icon: Icons.info_outline,
-                    title: '关于',
-                    subtitle: '应用信息与功能说明',
-                    onTap: () => openSection('about'),
-                  ),
-                ],
+    body: SafeArea(
+      top: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              _SettingsGroupTitle('工作区'),
+              _SettingsEntry(
+                store: widget.store,
+                icon: Icons.palette_outlined,
+                title: '外观',
+                subtitle: '主题、液态玻璃与透明度',
+                onTap: () => openSection('appearance'),
               ),
-            ),
+              _SettingsEntry(
+                store: widget.store,
+                icon: Icons.terminal,
+                title: '终端',
+                subtitle: '字体、配色、命令历史与屏幕常亮',
+                onTap: () => openSection('terminal'),
+              ),
+              const SizedBox(height: 18),
+              _SettingsGroupTitle('AI 与连接'),
+              _SettingsEntry(
+                store: widget.store,
+                icon: Icons.auto_awesome_outlined,
+                title: 'AI 助手',
+                subtitle: widget.store.aiEndpoint.isEmpty
+                    ? '配置模型与接口'
+                    : '${widget.store.aiChannelLabel} · ${widget.store.aiModel}',
+                onTap: () => openSection('ai'),
+              ),
+              _SettingsEntry(
+                store: widget.store,
+                icon: Icons.shield_outlined,
+                title: '安全与隐私',
+                subtitle: '凭据保存与设备认证',
+                onTap: () => openSection('security'),
+              ),
+              const SizedBox(height: 18),
+              _SettingsGroupTitle('应用'),
+              _SettingsEntry(
+                store: widget.store,
+                icon: Icons.import_export,
+                title: '配置备份',
+                subtitle: '导入或导出主机配置',
+                onTap: () => openSection('backup'),
+              ),
+              _SettingsEntry(
+                store: widget.store,
+                icon: Icons.info_outline,
+                title: '关于',
+                subtitle: '应用信息与功能说明',
+                onTap: () => openSection('about'),
+              ),
+            ],
           ),
         ),
-      ],
+      ),
     ),
   );
 
   Widget _appearanceSettings() => _settingsFrame('外观', [
     const _SectionTitle('应用主题'),
-    GlassSurface(
+    _SettingsPanel(
       store: widget.store,
       padding: const EdgeInsets.all(16),
       child: SegmentedButton<String>(
@@ -1374,7 +1414,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _terminalSettings() => _settingsFrame('终端', [
     const _SectionTitle('显示'),
-    GlassSurface(
+    _SettingsPanel(
       store: widget.store,
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1412,7 +1452,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     ),
     const _SectionTitle('操作'),
-    GlassSurface(
+    _SettingsPanel(
       store: widget.store,
       child: Column(
         children: [
@@ -1443,7 +1483,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _securitySettings() => _settingsFrame('安全与隐私', [
     const _SectionTitle('设备安全'),
-    GlassSurface(
+    _SettingsPanel(
       store: widget.store,
       child: SwitchListTile(
         title: const Text('读取已保存凭据前进行设备认证'),
@@ -1460,7 +1500,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _backupSettings() => _settingsFrame('配置备份', [
     const _SectionTitle('主机配置'),
-    GlassSurface(
+    _SettingsPanel(
       store: widget.store,
       child: Column(
         children: [
@@ -1483,7 +1523,7 @@ class _SettingsPageState extends State<SettingsPage> {
   ]);
 
   Widget _aboutSettings() => _settingsFrame('关于', [
-    GlassSurface(
+    _SettingsPanel(
       store: widget.store,
       child: const ListTile(
         leading: Icon(Icons.terminal),
@@ -1507,308 +1547,624 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildAiSettings() => Scaffold(
-    backgroundColor: Colors.transparent,
+    backgroundColor: Theme.of(context).colorScheme.surface,
     appBar: AppBar(
       title: const Text('AI 助手'),
       backgroundColor: Colors.transparent,
       surfaceTintColor: Colors.transparent,
     ),
-    body: Stack(
-      children: [
-        Positioned.fill(child: GlassBackdrop(store: widget.store)),
-        SafeArea(
-          top: false,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760),
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-                children: [
-                  const _SectionTitle('模型连接'),
-                  GlassSurface(
-                    store: widget.store,
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+    body: SafeArea(
+      top: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 760),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            children: [
+              const _SectionTitle('模型连接'),
+              _SettingsPanel(
+                store: widget.store,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: channelName,
+                      enabled: !aiBusy,
+                      decoration: const InputDecoration(
+                        labelText: '渠道名称',
+                        hintText: '例如：主用接口',
+                        helperText: '留空时显示网站域名',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: endpoint,
+                      enabled: !aiBusy,
+                      onChanged: (_) => setState(() {
+                        models = [];
+                        aiStatus = null;
+                        removeAiKey = false;
+                        _resetHeaders();
+                      }),
+                      keyboardType: TextInputType.url,
+                      decoration: const InputDecoration(
+                        labelText: 'AI 网站地址（HTTP / HTTPS）',
+                        hintText: 'https://api.example.com',
+                        helperText: '只填网站，接口路径自动补全',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<AiApi>(
+                      initialValue: selectedApi,
+                      decoration: const InputDecoration(labelText: '接口类型'),
+                      items: const [
+                        DropdownMenuItem(
+                          value: AiApi.chat,
+                          child: Text('Chat'),
+                        ),
+                        DropdownMenuItem(
+                          value: AiApi.responses,
+                          child: Text('Responses'),
+                        ),
+                      ],
+                      onChanged: aiBusy
+                          ? null
+                          : (value) {
+                              if (value != null) {
+                                setState(() {
+                                  selectedApi = value;
+                                  aiStatus = null;
+                                });
+                              }
+                            },
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: model,
+                      enabled: !aiBusy,
+                      decoration: const InputDecoration(labelText: '模型名称'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: apiKey,
+                      obscureText: hidden,
+                      enabled: !aiBusy && !removeAiKey,
+                      enableSuggestions: false,
+                      autocorrect: false,
+                      decoration: InputDecoration(
+                        labelText: 'API 密钥（留空保留现有密钥）',
+                        suffixIcon: IconButton(
+                          onPressed: () => setState(() => hidden = !hidden),
+                          icon: Icon(
+                            hidden ? Icons.visibility : Icons.visibility_off,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (widget.store.aiEndpoint.isNotEmpty &&
+                        aiBaseUrl(endpoint.text) ==
+                            aiBaseUrl(widget.store.aiEndpoint))
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('保存时清除现有 API 密钥'),
+                        value: removeAiKey,
+                        onChanged: aiBusy
+                            ? null
+                            : (value) =>
+                                  setState(() => removeAiKey = value == true),
+                      ),
+                    ExpansionTile(
+                      title: const Text('自定义请求头'),
+                      onExpansionChanged: (expanded) {
+                        if (expanded && !headersLoaded) {
+                          unawaited(_loadHeaders());
+                        }
+                      },
                       children: [
-                        TextField(
-                          controller: channelName,
-                          enabled: !aiBusy,
-                          decoration: const InputDecoration(
-                            labelText: '渠道名称',
-                            hintText: '例如：主用接口',
-                            helperText: '留空时显示网站域名',
+                        const Text(
+                          '适用于 Chat、Responses、模型列表和连接测试。请求头值加密保存；Authorization 可覆盖默认 Bearer。',
+                        ),
+                        if (!headersLoaded)
+                          TextButton(
+                            onPressed: aiBusy ? null : _loadHeaders,
+                            child: const Text('读取已保存请求头'),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: endpoint,
-                          enabled: !aiBusy,
-                          onChanged: (_) => setState(() {
-                            models = [];
-                            aiStatus = null;
-                            removeAiKey = false;
-                            _resetHeaders();
-                          }),
-                          keyboardType: TextInputType.url,
-                          decoration: const InputDecoration(
-                            labelText: 'AI 网站地址（HTTP / HTTPS）',
-                            hintText: 'https://api.example.com',
-                            helperText: '只填网站，接口路径自动补全',
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        DropdownButtonFormField<AiApi>(
-                          initialValue: selectedApi,
-                          decoration: const InputDecoration(labelText: '接口类型'),
-                          items: const [
-                            DropdownMenuItem(
-                              value: AiApi.chat,
-                              child: Text('Chat'),
-                            ),
-                            DropdownMenuItem(
-                              value: AiApi.responses,
-                              child: Text('Responses'),
-                            ),
-                          ],
-                          onChanged: aiBusy
-                              ? null
-                              : (value) {
-                                  if (value != null) {
-                                    setState(() {
-                                      selectedApi = value;
-                                      aiStatus = null;
-                                    });
-                                  }
-                                },
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: model,
-                          enabled: !aiBusy,
-                          decoration: const InputDecoration(labelText: '模型名称'),
-                        ),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: apiKey,
-                          obscureText: hidden,
-                          enabled: !aiBusy && !removeAiKey,
-                          enableSuggestions: false,
-                          autocorrect: false,
-                          decoration: InputDecoration(
-                            labelText: 'API 密钥（留空保留现有密钥）',
-                            suffixIcon: IconButton(
-                              onPressed: () => setState(() => hidden = !hidden),
-                              icon: Icon(
-                                hidden
-                                    ? Icons.visibility
-                                    : Icons.visibility_off,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        if (widget.store.aiEndpoint.isNotEmpty &&
-                            aiBaseUrl(endpoint.text) ==
-                                aiBaseUrl(widget.store.aiEndpoint))
-                          CheckboxListTile(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text('保存时清除现有 API 密钥'),
-                            value: removeAiKey,
-                            onChanged: aiBusy
-                                ? null
-                                : (value) => setState(
-                                    () => removeAiKey = value == true,
-                                  ),
-                          ),
-                        ExpansionTile(
-                          title: const Text('自定义请求头'),
-                          onExpansionChanged: (expanded) {
-                            if (expanded && !headersLoaded) {
-                              unawaited(_loadHeaders());
-                            }
-                          },
-                          children: [
-                            const Text(
-                              '适用于 Chat、Responses、模型列表和连接测试。请求头值加密保存；Authorization 可覆盖默认 Bearer。',
-                            ),
-                            if (!headersLoaded)
-                              TextButton(
-                                onPressed: aiBusy ? null : _loadHeaders,
-                                child: const Text('读取已保存请求头'),
-                              ),
-                            for (final row in headerRows)
-                              Padding(
-                                key: ObjectKey(row),
-                                padding: const EdgeInsets.only(top: 8),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Expanded(
-                                      child: Column(
-                                        children: [
-                                          TextField(
-                                            controller: row.name,
-                                            enabled: !aiBusy,
-                                            autocorrect: false,
-                                            enableSuggestions: false,
-                                            decoration: const InputDecoration(
-                                              labelText: '请求头名称',
-                                              hintText: 'X-Custom-Header',
-                                            ),
-                                            onChanged: (_) =>
-                                                headersEdited = true,
-                                          ),
-                                          TextField(
-                                            controller: row.value,
-                                            enabled: !aiBusy,
-                                            obscureText: headersHidden,
-                                            autocorrect: false,
-                                            enableSuggestions: false,
-                                            decoration: const InputDecoration(
-                                              labelText: '请求头值',
-                                            ),
-                                            onChanged: (_) =>
-                                                headersEdited = true,
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: '删除请求头',
-                                      onPressed: aiBusy
-                                          ? null
-                                          : () {
-                                              setState(() {
-                                                headerRows.remove(row);
-                                                headersEdited = true;
-                                              });
-                                              row.dispose();
-                                            },
-                                      icon: const Icon(Icons.delete_outline),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            Wrap(
-                              spacing: 8,
+                        for (final row in headerRows)
+                          Padding(
+                            key: ObjectKey(row),
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                TextButton.icon(
-                                  onPressed: aiBusy || !headersLoaded
-                                      ? null
-                                      : () => setState(() {
-                                          headerRows.add(_AiHeaderRow());
-                                          headersEdited = true;
-                                        }),
-                                  icon: const Icon(Icons.add),
-                                  label: const Text('添加请求头'),
-                                ),
-                                TextButton.icon(
-                                  onPressed: aiBusy || headerRows.isEmpty
-                                      ? null
-                                      : () => setState(
-                                          () => headersHidden = !headersHidden,
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      TextField(
+                                        controller: row.name,
+                                        enabled: !aiBusy,
+                                        autocorrect: false,
+                                        enableSuggestions: false,
+                                        decoration: const InputDecoration(
+                                          labelText: '请求头名称',
+                                          hintText: 'X-Custom-Header',
                                         ),
-                                  icon: Icon(
-                                    headersHidden
-                                        ? Icons.visibility
-                                        : Icons.visibility_off,
+                                        onChanged: (_) => headersEdited = true,
+                                      ),
+                                      TextField(
+                                        controller: row.value,
+                                        enabled: !aiBusy,
+                                        obscureText: headersHidden,
+                                        autocorrect: false,
+                                        enableSuggestions: false,
+                                        decoration: const InputDecoration(
+                                          labelText: '请求头值',
+                                        ),
+                                        onChanged: (_) => headersEdited = true,
+                                      ),
+                                    ],
                                   ),
-                                  label: Text(
-                                    headersHidden ? '显示请求头值' : '隐藏请求头值',
-                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: '删除请求头',
+                                  onPressed: aiBusy
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            headerRows.remove(row);
+                                            headersEdited = true;
+                                          });
+                                          row.dispose();
+                                        },
+                                  icon: const Icon(Icons.delete_outline),
                                 ),
                               ],
                             ),
-                          ],
-                        ),
-                        if (models.isNotEmpty)
-                          DropdownMenu<String>(
-                            expandedInsets: EdgeInsets.zero,
-                            enabled: !aiBusy,
-                            enableFilter: true,
-                            label: const Text('从服务模型列表选择'),
-                            dropdownMenuEntries: [
-                              for (final name in models)
-                                DropdownMenuEntry(value: name, label: name),
-                            ],
-                            onSelected: (value) {
-                              if (value != null) model.text = value;
-                            },
                           ),
                         Wrap(
                           spacing: 8,
                           children: [
-                            OutlinedButton(
-                              onPressed: aiBusy
+                            TextButton.icon(
+                              onPressed: aiBusy || !headersLoaded
                                   ? null
-                                  : () => checkAi(listModels: true),
-                              child: const Text('获取模型列表'),
+                                  : () => setState(() {
+                                      headerRows.add(_AiHeaderRow());
+                                      headersEdited = true;
+                                    }),
+                              icon: const Icon(Icons.add),
+                              label: const Text('添加请求头'),
                             ),
-                            OutlinedButton(
-                              onPressed: aiBusy
+                            TextButton.icon(
+                              onPressed: aiBusy || headerRows.isEmpty
                                   ? null
-                                  : () => checkAi(listModels: false),
-                              child: const Text('测试模型连接'),
+                                  : () => setState(
+                                      () => headersHidden = !headersHidden,
+                                    ),
+                              icon: Icon(
+                                headersHidden
+                                    ? Icons.visibility
+                                    : Icons.visibility_off,
+                              ),
+                              label: Text(headersHidden ? '显示请求头值' : '隐藏请求头值'),
                             ),
                           ],
-                        ),
-                        if (aiBusy) const LinearProgressIndicator(),
-                        if (aiStatus != null)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(aiStatus!),
-                          ),
-                        ExpansionTile(
-                          title: const Text('模型容量与上下文压缩'),
-                          children: [
-                            TextField(
-                              controller: contextWindow,
-                              enabled: !aiBusy,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: '模型上下文窗口（tokens）',
-                              ),
-                            ),
-                            TextField(
-                              controller: maxOutput,
-                              enabled: !aiBusy,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: '最大输出（含推理 tokens）',
-                              ),
-                            ),
-                            TextField(
-                              controller: compression,
-                              enabled: !aiBusy,
-                              keyboardType: TextInputType.number,
-                              decoration: const InputDecoration(
-                                labelText: '自动压缩阈值（50%–90%）',
-                              ),
-                            ),
-                            const Text(
-                              '按服务提供的模型规格填写；无 usage 数据时显示估算值，不能从模型名称可靠推断容量。',
-                            ),
-                          ],
-                        ),
-                        const Text('连接测试使用所选接口发送固定消息。Agent 执行结果会发送给此服务继续分析。'),
-                        const SizedBox(height: 12),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: FilledButton(
-                            onPressed: aiBusy ? null : saveAi,
-                            child: const Text('加密保存 AI 设置'),
-                          ),
                         ),
                       ],
                     ),
+                    if (models.isNotEmpty)
+                      DropdownMenu<String>(
+                        expandedInsets: EdgeInsets.zero,
+                        enabled: !aiBusy,
+                        enableFilter: true,
+                        label: const Text('从服务模型列表选择'),
+                        dropdownMenuEntries: [
+                          for (final name in models)
+                            DropdownMenuEntry(value: name, label: name),
+                        ],
+                        onSelected: (value) {
+                          if (value != null) model.text = value;
+                        },
+                      ),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        OutlinedButton(
+                          onPressed: aiBusy
+                              ? null
+                              : () => checkAi(listModels: true),
+                          child: const Text('获取模型列表'),
+                        ),
+                        OutlinedButton(
+                          onPressed: aiBusy
+                              ? null
+                              : () => checkAi(listModels: false),
+                          child: const Text('测试模型连接'),
+                        ),
+                      ],
+                    ),
+                    if (aiBusy) const LinearProgressIndicator(),
+                    if (aiStatus != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(aiStatus!),
+                      ),
+                    ExpansionTile(
+                      title: const Text('模型容量与上下文压缩'),
+                      children: [
+                        TextField(
+                          controller: contextWindow,
+                          enabled: !aiBusy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '模型上下文窗口（tokens）',
+                          ),
+                        ),
+                        TextField(
+                          controller: maxOutput,
+                          enabled: !aiBusy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '最大输出（含推理 tokens）',
+                          ),
+                        ),
+                        TextField(
+                          controller: compression,
+                          enabled: !aiBusy,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '自动压缩阈值（50%–90%）',
+                          ),
+                        ),
+                        const Text(
+                          '按服务提供的模型规格填写；无 usage 数据时显示估算值，不能从模型名称可靠推断容量。',
+                        ),
+                      ],
+                    ),
+                    const Text('连接测试使用所选接口发送固定消息。Agent 执行结果会发送给此服务继续分析。'),
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton(
+                        onPressed: aiBusy ? null : saveAi,
+                        child: const Text('加密保存 AI 设置'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _SettingsPanel extends StatelessWidget {
+  const _SettingsPanel({
+    required this.store,
+    required this.child,
+    this.padding = EdgeInsets.zero,
+  });
+
+  final AppStore store;
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerLow.withValues(
+          alpha: store.glassStyle == 'solid' ? 1 : .98,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: .5)),
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+}
+
+class _WorkspaceHero extends StatelessWidget {
+  const _WorkspaceHero({
+    required this.hostCount,
+    required this.sessionCount,
+    required this.onQuickConnect,
+    required this.onAddHost,
+  });
+
+  final int hostCount;
+  final int sessionCount;
+  final VoidCallback onQuickConnect;
+  final VoidCallback onAddHost;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(28),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xff142a31), Color(0xff174e4a), Color(0xff0d7669)],
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: colors.primary.withValues(alpha: .15),
+              blurRadius: 30,
+              offset: const Offset(0, 14),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -56,
+              right: -32,
+              child: Container(
+                width: 190,
+                height: 190,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: .08),
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.shield_outlined,
+                        size: 16,
+                        color: Color(0xffa5f1dd),
+                      ),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          'SECURE REMOTE WORKSPACE',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: const Color(0xffbcece0),
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.1,
+                              ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '你的服务器，随时就绪。',
+                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -.4,
+                    ),
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    '安全连接主机，继续终端与文件工作。',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: Colors.white.withValues(alpha: .78),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Wrap(
+                    spacing: 18,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _HeroMetric(value: '$hostCount', label: '已保存主机'),
+                      Container(
+                        width: 1,
+                        height: 30,
+                        color: Colors.white.withValues(alpha: .22),
+                      ),
+                      _HeroMetric(value: '$sessionCount', label: '在线会话'),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xffe3fff5),
+                          foregroundColor: const Color(0xff103b35),
+                        ),
+                        onPressed: onQuickConnect,
+                        icon: const Icon(Icons.bolt_rounded),
+                        label: const Text('快速连接'),
+                      ),
+                      Tooltip(
+                        message: '添加主机',
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: BorderSide(
+                              color: Colors.white.withValues(alpha: .42),
+                            ),
+                          ),
+                          onPressed: onAddHost,
+                          icon: const Icon(Icons.add),
+                          label: const Text('添加主机'),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.label, required this.active});
+
+  final String label;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final color = active ? colors.primary : colors.tertiary;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .12),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 5),
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PageIntro extends StatelessWidget {
+  const _PageIntro({
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+  });
+
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+  final String trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          eyebrow,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: colors.primary,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.4,
           ),
         ),
+        const SizedBox(height: 5),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -.5,
+                ),
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: colors.primaryContainer.withValues(alpha: .55),
+                borderRadius: BorderRadius.circular(99),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Text(
+                  trailing,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: colors.onPrimaryContainer,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(subtitle, style: Theme.of(context).textTheme.bodyMedium),
       ],
+    );
+  }
+}
+
+class _HeroMetric extends StatelessWidget {
+  const _HeroMetric({required this.value, required this.label});
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Text(
+        value,
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Text(
+        label,
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: Colors.white.withValues(alpha: .76),
+        ),
+      ),
+    ],
+  );
+}
+
+class _SettingsGroupTitle extends StatelessWidget {
+  const _SettingsGroupTitle(this.label);
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+    child: Text(
+      label,
+      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+        color: Theme.of(context).colorScheme.primary,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1.3,
+      ),
     ),
   );
 }
@@ -1829,17 +2185,58 @@ class _SettingsEntry extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => GlassSurface(
-    store: store,
-    margin: const EdgeInsets.only(bottom: 10),
-    child: ListTile(
-      leading: Icon(icon, color: Theme.of(context).colorScheme.primary),
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: onTap,
-    ),
-  );
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 2),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer.withValues(alpha: .55),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: colors.primary),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -1853,33 +2250,6 @@ class _SectionTitle extends StatelessWidget {
       style: Theme.of(context).textTheme.titleSmall?.copyWith(
         fontWeight: FontWeight.w700,
         color: Theme.of(context).colorScheme.primary,
-      ),
-    ),
-  );
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onAdd});
-  final VoidCallback onAdd;
-  @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.dns_outlined, size: 48),
-          const SizedBox(height: 16),
-          Text('添加第一台服务器', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 8),
-          const Text('保存连接配置，随时开始 SSH 会话。', textAlign: TextAlign.center),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add),
-            label: const Text('添加主机'),
-          ),
-        ],
       ),
     ),
   );
