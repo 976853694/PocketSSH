@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_ssh/core/app_store.dart';
+import 'package:pocket_ssh/core/device_bridge.dart';
 import 'package:pocket_ssh/main.dart';
 
 class _SettingsStore extends AppStore {
@@ -60,6 +63,66 @@ Future<void> _saveHeadersForm(WidgetTester tester) async {
 }
 
 void main() {
+  for (final (theme, textScale) in [('light', 1.0), ('dark', 1.5)]) {
+    testWidgets('AI field labels clear the border and value in $theme mode', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = textScale;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      final messenger = tester.binding.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(nativeDeviceChannel, (call) async {
+        expect(call.method, 'loadState');
+        return jsonEncode({
+          'theme': theme,
+          'aiChannelName': '测试渠道',
+          'aiEndpoint': 'https://models.example.test',
+          'aiModel': 'fixture-model',
+          'aiApi': 'responses',
+        });
+      });
+      addTearDown(
+        () => messenger.setMockMethodCallHandler(nativeDeviceChannel, null),
+      );
+
+      await tester.pumpWidget(const PocketSshApp());
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('设置'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('AI 助手'));
+      await tester.pumpAndSettle();
+
+      for (final (title, previousHelp, value) in [
+        ('AI 网站地址（HTTP / HTTPS）', '留空时显示网站域名', find.byType(EditableText)),
+        ('接口类型', '只填网站，接口路径自动补全', find.text('Responses')),
+      ]) {
+        final label = find.text(title);
+        final field = find.ancestor(
+          of: label,
+          matching: find.byType(InputDecorator),
+        );
+        final labelRect = tester.getRect(label);
+        final valueRect = tester.getRect(
+          find.descendant(of: field, matching: value),
+        );
+        expect(labelRect.top, greaterThan(tester.getTopLeft(field).dy));
+        expect(
+          labelRect.top,
+          greaterThan(tester.getBottomLeft(find.text(previousHelp)).dy),
+        );
+        expect(labelRect.bottom, lessThanOrEqualTo(valueRect.top));
+      }
+    });
+  }
+
   for (final failSave in [false, true]) {
     testWidgets(
       'custom headers ${failSave ? 'restore old encrypted values after failed save' : 'can be edited with values hidden by default'}',

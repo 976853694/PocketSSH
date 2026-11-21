@@ -89,7 +89,8 @@ class _PocketSshAppState extends State<PocketSshApp> {
 
   ThemeData _theme(Brightness brightness) {
     final colors = AppPalette.scheme(brightness);
-    final fieldBorder = OutlineInputBorder(
+    // 让浮动标签留在填充区域内，避免跨过输入框的顶边。
+    final fieldBorder = UnderlineInputBorder(
       borderRadius: BorderRadius.circular(10),
       borderSide: BorderSide(color: colors.outlineVariant),
     );
@@ -1655,6 +1656,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     if (models.isNotEmpty)
                       DropdownMenu<String>(
                         expandedInsets: EdgeInsets.zero,
+                        inputDecorationTheme: InputDecorationTheme.of(context),
                         enabled: !aiBusy,
                         enableFilter: true,
                         label: const Text('从服务模型列表选择'),
