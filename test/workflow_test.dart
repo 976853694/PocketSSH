@@ -21,6 +21,8 @@ void main() {
       contains('flutter build apk --debug --target-platform android-arm64'),
     );
     expect(workflow, contains('name: pocket-ssh-debug-arm64'));
+    expect(workflow, contains('name: PocketSSH-performance-arm64'));
+    expect(workflow, contains('ORG_GRADLE_PROJECT_pocketsshPerformanceBuild'));
     expect(workflow, contains('flutter build ios --release --no-codesign'));
     expect(workflow, contains('flutter build macos --release'));
     expect(workflow, contains('flutter build windows --release'));

@@ -83,13 +83,21 @@ abstract final class AppPalette {
   static const terminalSearch = Color(0xfff0ca7b);
   static const terminalSearchCurrent = Color(0xff8db89b);
 
-  static ColorScheme scheme(Brightness brightness) {
+  static final _lightScheme = _createScheme(Brightness.light);
+  static final _darkScheme = _createScheme(Brightness.dark);
+
+  static ColorScheme scheme(Brightness brightness) =>
+      brightness == Brightness.dark ? _darkScheme : _lightScheme;
+
+  static ColorScheme _createScheme(Brightness brightness) {
     final dark = brightness == Brightness.dark;
-    return ColorScheme.fromSeed(
-      seedColor: accent,
+    return ColorScheme(
       brightness: brightness,
       surface: dark ? darkSurface : lightSurface,
-    ).copyWith(
+      surfaceTint: dark ? darkPrimary : lightPrimary,
+      inverseSurface: dark ? lightOnSurface : darkOnSurface,
+      onInverseSurface: dark ? lightSurface : darkSurface,
+      inversePrimary: dark ? lightPrimary : darkPrimary,
       primary: dark ? darkPrimary : lightPrimary,
       onPrimary: dark ? darkOnPrimary : Colors.white,
       primaryContainer: dark ? darkPrimaryContainer : lightPrimaryContainer,

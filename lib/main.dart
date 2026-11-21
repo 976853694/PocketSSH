@@ -27,20 +27,39 @@ class PocketSshApp extends StatefulWidget {
 }
 
 class _PocketSshAppState extends State<PocketSshApp> {
-  final store = AppStore();
+  final store = AppStore(loading: true);
   final sessions = Sessions();
+  ThemeMode _themeMode = ThemeMode.system;
+  late final _lightTheme = _theme(Brightness.light);
+  late final _darkTheme = _theme(Brightness.dark);
+  late final _home = PocketHome(store: store, sessions: sessions);
+  bool _awake = false;
 
   @override
   void initState() {
     super.initState();
     sessions.addListener(syncKeepAwake);
-    store.addListener(syncKeepAwake);
-    unawaited(store.load());
+    store.addListener(_onStoreChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(store.load());
+    });
+  }
+
+  void _onStoreChanged() {
+    final mode = switch (store.theme) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+    if (mode != _themeMode) setState(() => _themeMode = mode);
+    syncKeepAwake();
   }
 
   void syncKeepAwake() {
     final active =
         store.keepAwake && sessions.items.any((session) => session.connected);
+    if (_awake == active) return;
+    _awake = active;
     unawaited(
       deviceBridge.invokeMethod<void>('keepAwake', active).catchError((_) {}),
     );
@@ -49,7 +68,7 @@ class _PocketSshAppState extends State<PocketSshApp> {
   @override
   void dispose() {
     sessions.removeListener(syncKeepAwake);
-    store.removeListener(syncKeepAwake);
+    store.removeListener(_onStoreChanged);
     for (final session in sessions.items) {
       session.stop();
     }
@@ -59,20 +78,13 @@ class _PocketSshAppState extends State<PocketSshApp> {
   }
 
   @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: store,
-    builder: (context, _) => MaterialApp(
-      title: 'Pocket SSH',
-      debugShowCheckedModeBanner: false,
-      themeMode: switch (store.theme) {
-        'light' => ThemeMode.light,
-        'dark' => ThemeMode.dark,
-        _ => ThemeMode.system,
-      },
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
-      home: PocketHome(store: store, sessions: sessions),
-    ),
+  Widget build(BuildContext context) => MaterialApp(
+    title: 'Pocket SSH',
+    debugShowCheckedModeBanner: false,
+    themeMode: _themeMode,
+    theme: _lightTheme,
+    darkTheme: _darkTheme,
+    home: _home,
   );
 
   ThemeData _theme(Brightness brightness) {
@@ -157,7 +169,8 @@ class PocketHome extends StatefulWidget {
 
 class _PocketHomeState extends State<PocketHome> {
   int tab = 0;
-  String filter = '';
+  final _hostSearch = TextEditingController();
+  final _pageStorage = PageStorageBucket();
 
   @override
   void initState() {
@@ -187,6 +200,7 @@ class _PocketHomeState extends State<PocketHome> {
   void dispose() {
     widget.sessions.removeListener(_refresh);
     widget.store.removeListener(_refresh);
+    _hostSearch.dispose();
     super.dispose();
   }
 
@@ -425,9 +439,18 @@ class _PocketHomeState extends State<PocketHome> {
   @override
   Widget build(BuildContext context) {
     final wide = MediaQuery.sizeOf(context).width >= 900;
-    final page = IndexedStack(
-      index: tab,
-      children: [hostsPage(), sessionsPage(), transfersPage()],
+    final page = PageStorage(
+      bucket: _pageStorage,
+      child: RepaintBoundary(
+        child: KeyedSubtree(
+          key: ValueKey(tab),
+          child: switch (tab) {
+            0 => hostsPage(),
+            1 => sessionsPage(),
+            _ => transfersPage(),
+          },
+        ),
+      ),
     );
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.surface,
@@ -538,34 +561,38 @@ class _PocketHomeState extends State<PocketHome> {
   }
 
   Widget hostsPage() {
+    final filter = _hostSearch.text.trim().toLowerCase();
     final hosts =
-        widget.store.hosts
-            .where(
-              (host) =>
-                  '${host.name} ${host.host} ${host.username} ${host.group}'
-                      .toLowerCase()
-                      .contains(filter.toLowerCase()),
-            )
-            .toList()
-          ..sort(
-            (a, b) => (b.lastUsed ?? DateTime(0)).compareTo(
-              a.lastUsed ?? DateTime(0),
-            ),
-          );
-    final groups =
-        hosts
-            .map((host) => host.group.isEmpty ? '未分组' : host.group)
-            .toSet()
-            .toList()
-          ..sort();
+        widget.store.hosts.where((host) {
+          if (filter.isEmpty) return true;
+          return '${host.name} ${host.host} ${host.username} ${host.group}'
+              .toLowerCase()
+              .contains(filter);
+        }).toList()..sort(
+          (a, b) => (b.lastUsed?.millisecondsSinceEpoch ?? 0).compareTo(
+            a.lastUsed?.millisecondsSinceEpoch ?? 0,
+          ),
+        );
+    final grouped = <String, List<HostProfile>>{};
+    for (final host in hosts) {
+      (grouped[host.group.isEmpty ? '未分组' : host.group] ??= []).add(host);
+    }
+    final groups = grouped.keys.toList()..sort();
+    final activeSessions = <String, WorkspaceSession>{};
+    for (final session in widget.sessions.items) {
+      if (!session.finished) {
+        activeSessions.putIfAbsent(session.profile.id, () => session);
+      }
+    }
     return CustomScrollView(
+      key: const PageStorageKey('hosts'),
       slivers: [
         SliverAppBar(
           floating: true,
           title: const Text('主机'),
           actions: [
             IconButton(
-              onPressed: openSettings,
+              onPressed: widget.store.loading ? null : openSettings,
               tooltip: '设置',
               icon: const Icon(Icons.settings_outlined),
             ),
@@ -579,8 +606,10 @@ class _PocketHomeState extends State<PocketHome> {
               sessionCount: widget.sessions.items
                   .where((session) => session.connected)
                   .length,
-              onQuickConnect: () => edit(null, true),
-              onAddHost: () => edit(),
+              onQuickConnect: widget.store.loading
+                  ? null
+                  : () => edit(null, true),
+              onAddHost: widget.store.loading ? null : () => edit(),
             ),
           ),
         ),
@@ -588,7 +617,8 @@ class _PocketHomeState extends State<PocketHome> {
           padding: const EdgeInsets.fromLTRB(22, 8, 22, 18),
           sliver: SliverToBoxAdapter(
             child: TextField(
-              onChanged: (value) => setState(() => filter = value),
+              controller: _hostSearch,
+              onChanged: (_) => setState(() {}),
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
                 hintText: '搜索主机、地址或分组',
@@ -596,7 +626,14 @@ class _PocketHomeState extends State<PocketHome> {
             ),
           ),
         ),
-        if (hosts.isEmpty)
+        if (widget.store.loading)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(22, 8, 22, 18),
+              child: Text('正在读取主机配置…'),
+            ),
+          )
+        else if (hosts.isEmpty)
           SliverFillRemaining(
             hasScrollBody: false,
             child: _EmptyStateMessage(
@@ -616,116 +653,103 @@ class _PocketHomeState extends State<PocketHome> {
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 22),
               sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (context, index) {
-                    final rows = hosts
-                        .where(
-                          (host) =>
-                              (host.group.isEmpty ? '未分组' : host.group) ==
-                              group,
-                        )
-                        .toList();
-                    final host = rows[index];
-                    final activeSession = widget.sessions.items
-                        .where((session) => session.profile.id == host.id)
-                        .firstOrNull;
-                    return DecoratedBox(
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
+                delegate: SliverChildBuilderDelegate((context, index) {
+                  final host = grouped[group]![index];
+                  final activeSession = activeSessions[host.id];
+                  return DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Theme.of(context).colorScheme.outlineVariant,
                         ),
                       ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 6,
-                        ),
-                        leading: Icon(
-                          host.keyAuth ? Icons.key_rounded : Icons.dns_outlined,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          size: 21,
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                host.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
+                    ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 6,
+                      ),
+                      leading: Icon(
+                        host.auth == HostAuth.privateKey
+                            ? Icons.key_rounded
+                            : Icons.dns_outlined,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        size: 21,
+                      ),
+                      title: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              host.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                            if (activeSession != null) ...[
-                              const SizedBox(width: 8),
-                              _StatusBadge(
-                                label: activeSession.connected ? '在线' : '连接中',
-                                active: activeSession.connected,
-                              ),
-                            ],
+                          ),
+                          if (activeSession != null) ...[
+                            const SizedBox(width: 8),
+                            _StatusBadge(
+                              label: activeSession.connected ? '在线' : '连接中',
+                              active: activeSession.connected,
+                            ),
                           ],
-                        ),
-                        subtitle: Text(
-                          '${host.username}@${host.host}:${host.port}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onTap: () => connect(host),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              tooltip: '连接 ${host.name}',
-                              onPressed: connecting
-                                  ? null
-                                  : () => connect(host),
-                              icon: const Icon(Icons.arrow_outward),
-                            ),
-                            PopupMenuButton<String>(
-                              onSelected: (value) {
-                                if (value == 'edit') edit(host);
-                                if (value == 'sftp') connect(host, sftp: true);
-                                if (value == 'credentials') {
-                                  connect(host, replaceCredentials: true);
-                                }
-                                if (value == 'delete') removeHost(host);
-                                if (value == 'trust') forgetTrust(host);
-                              },
-                              itemBuilder: (_) => const [
-                                PopupMenuItem(value: 'edit', child: Text('编辑')),
-                                PopupMenuItem(
-                                  value: 'sftp',
-                                  child: Text('打开 SFTP'),
-                                ),
-                                PopupMenuItem(
+                        ],
+                      ),
+                      subtitle: Text(
+                        '${host.username}@${host.host}:${host.port}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      onTap: () => connect(host),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: '连接 ${host.name}',
+                            onPressed: connecting ? null : () => connect(host),
+                            icon: const Icon(Icons.arrow_outward),
+                          ),
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') edit(host);
+                              if (value == 'sftp') connect(host, sftp: true);
+                              if (value == 'credentials') {
+                                connect(host, replaceCredentials: true);
+                              }
+                              if (value == 'delete') removeHost(host);
+                              if (value == 'trust') forgetTrust(host);
+                            },
+                            itemBuilder: (_) => [
+                              const PopupMenuItem(
+                                value: 'edit',
+                                child: Text('编辑'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'sftp',
+                                child: Text('打开 SFTP'),
+                              ),
+                              if (host.auth != HostAuth.none)
+                                const PopupMenuItem(
                                   value: 'credentials',
                                   child: Text('更换登录凭据'),
                                 ),
-                                PopupMenuItem(
-                                  value: 'trust',
-                                  child: Text('重新核对指纹'),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Text('删除'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
+                              const PopupMenuItem(
+                                value: 'trust',
+                                child: Text('重新核对指纹'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'delete',
+                                child: Text('删除'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    );
-                  },
-                  childCount: hosts
-                      .where(
-                        (host) =>
-                            (host.group.isEmpty ? '未分组' : host.group) == group,
-                      )
-                      .length,
-                ),
+                    ),
+                  );
+                }, childCount: grouped[group]!.length),
               ),
             ),
           ],
@@ -756,6 +780,7 @@ class _PocketHomeState extends State<PocketHome> {
   }
 
   Widget sessionsPage() => CustomScrollView(
+    key: const PageStorageKey('sessions'),
     slivers: [
       SliverAppBar(
         floating: true,
@@ -763,7 +788,7 @@ class _PocketHomeState extends State<PocketHome> {
         actions: [
           IconButton(
             tooltip: '设置',
-            onPressed: openSettings,
+            onPressed: widget.store.loading ? null : openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
@@ -824,6 +849,7 @@ class _PocketHomeState extends State<PocketHome> {
   );
 
   Widget transfersPage() => CustomScrollView(
+    key: const PageStorageKey('files'),
     slivers: [
       SliverAppBar(
         floating: true,
@@ -831,7 +857,7 @@ class _PocketHomeState extends State<PocketHome> {
         actions: [
           IconButton(
             tooltip: '设置',
-            onPressed: openSettings,
+            onPressed: widget.store.loading ? null : openSettings,
             icon: const Icon(Icons.settings_outlined),
           ),
         ],
@@ -849,11 +875,13 @@ class _PocketHomeState extends State<PocketHome> {
       ),
       if (connecting)
         const SliverToBoxAdapter(child: LinearProgressIndicator()),
-      for (final host in widget.store.hosts)
-        SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-          sliver: SliverToBoxAdapter(
-            child: DecoratedBox(
+      SliverPadding(
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        sliver: SliverList.builder(
+          itemCount: widget.store.hosts.length,
+          itemBuilder: (context, index) {
+            final host = widget.store.hosts[index];
+            return DecoratedBox(
               decoration: BoxDecoration(
                 border: Border(
                   bottom: BorderSide(
@@ -870,9 +898,10 @@ class _PocketHomeState extends State<PocketHome> {
                 trailing: const Icon(Icons.chevron_right),
                 onTap: connecting ? null : () => connect(host, sftp: true),
               ),
-            ),
-          ),
+            );
+          },
         ),
+      ),
       if (widget.sessions.items.isEmpty && widget.store.hosts.isEmpty)
         const SliverFillRemaining(
           hasScrollBody: false,
@@ -1806,8 +1835,8 @@ class _WorkspaceHero extends StatelessWidget {
 
   final int hostCount;
   final int sessionCount;
-  final VoidCallback onQuickConnect;
-  final VoidCallback onAddHost;
+  final VoidCallback? onQuickConnect;
+  final VoidCallback? onAddHost;
 
   @override
   Widget build(BuildContext context) {

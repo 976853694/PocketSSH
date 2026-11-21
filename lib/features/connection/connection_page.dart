@@ -36,7 +36,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
   late final forwardPort = TextEditingController(
     text: '${initial?.forwardTargetPort ?? 5432}',
   );
-  late bool keyAuth = initial?.keyAuth ?? false;
+  late HostAuth auth = initial?.auth ?? HostAuth.password;
   late bool remember = initial?.remember ?? false;
   late String? jumpId = initial?.jumpId;
   bool saving = false;
@@ -55,7 +55,7 @@ class _ConnectionPageState extends State<ConnectionPage> {
           ? '127.0.0.1'
           : forwardHost.text.trim(),
       forwardTargetPort: int.tryParse(forwardPort.text.trim()) ?? 5432,
-      keyAuth: keyAuth,
+      auth: auth,
       remember: remember,
       jumpId: jumpId,
       lastUsed: initial?.lastUsed,
@@ -69,8 +69,8 @@ class _ConnectionPageState extends State<ConnectionPage> {
     try {
       if (!widget.quick && store != null) {
         if (initial != null &&
-            (!remember ||
-                initial!.keyAuth != keyAuth ||
+            (!profile.remember ||
+                initial!.auth != profile.auth ||
                 initial!.host != profile.host ||
                 initial!.port != profile.port ||
                 initial!.username != profile.username)) {
@@ -204,23 +204,25 @@ class _ConnectionPageState extends State<ConnectionPage> {
                 const SizedBox(height: 22),
                 const _ConnectionSectionLabel('认证方式'),
                 const SizedBox(height: 10),
-                SegmentedButton<bool>(
+                SegmentedButton<HostAuth>(
+                  showSelectedIcon: false,
                   segments: const [
+                    ButtonSegment(value: HostAuth.password, label: Text('密码')),
                     ButtonSegment(
-                      value: false,
-                      label: Text('密码'),
-                      icon: Icon(Icons.password),
-                    ),
-                    ButtonSegment(
-                      value: true,
+                      value: HostAuth.privateKey,
                       label: Text('私钥'),
-                      icon: Icon(Icons.key),
                     ),
+                    ButtonSegment(value: HostAuth.none, label: Text('无凭据')),
                   ],
-                  selected: {keyAuth},
-                  onSelectionChanged: (v) => setState(() => keyAuth = v.first),
+                  selected: {auth},
+                  onSelectionChanged: (v) => setState(() => auth = v.first),
                 ),
-                if (!widget.quick)
+                if (auth == HostAuth.none)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text('仅适用于允许无凭据认证的服务器，连接时仍会校验主机指纹。'),
+                  )
+                else if (!widget.quick)
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('加密保存凭据'),
@@ -346,6 +348,8 @@ Future<Credentials?> requestCredentials(
   AppStore store, {
   bool forcePrompt = false,
 }) async {
+  if (host.auth == HostAuth.none) return Credentials();
+  final keyAuth = host.auth == HostAuth.privateKey;
   final saved = forcePrompt ? null : await store.credentials(host);
   if (forcePrompt && host.remember && !await store.unlock()) return null;
   if (saved != null || !context.mounted) return saved;
@@ -366,7 +370,7 @@ Future<Credentials?> requestCredentials(
             children: [
               Text('${host.username}@${host.host}:${host.port}'),
               const SizedBox(height: 12),
-              if (host.keyAuth)
+              if (keyAuth)
                 OutlinedButton.icon(
                   onPressed: busy
                       ? null
@@ -396,14 +400,14 @@ Future<Credentials?> requestCredentials(
                 enableSuggestions: false,
                 autocorrect: false,
                 decoration: InputDecoration(
-                  labelText: host.keyAuth ? '私钥口令（可选）' : '密码',
+                  labelText: keyAuth ? '私钥口令（可选）' : '密码',
                   errorText: error,
                 ),
               ),
               if (canRemember)
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(host.keyAuth ? '加密记住私钥和口令' : '加密记住密码'),
+                  title: Text(keyAuth ? '加密记住私钥和口令' : '加密记住密码'),
                   value: remember,
                   onChanged: (value) =>
                       setState(() => remember = value == true),
@@ -420,13 +424,13 @@ Future<Credentials?> requestCredentials(
             onPressed: busy
                 ? null
                 : () {
-                    if (host.keyAuth ? key.isEmpty : secret.text.isEmpty) {
-                      setState(() => error = host.keyAuth ? '请选择私钥' : '请输入密码');
+                    if (keyAuth ? key.isEmpty : secret.text.isEmpty) {
+                      setState(() => error = keyAuth ? '请选择私钥' : '请输入密码');
                       return;
                     }
                     Navigator.pop(
                       dialog,
-                      host.keyAuth
+                      keyAuth
                           ? Credentials(
                               key: key,
                               passphrase: secret.text,

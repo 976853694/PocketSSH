@@ -92,6 +92,25 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Build ARM64 performance APK
+        if: github.ref_type == 'branch'
+        env:
+          ORG_GRADLE_PROJECT_pocketsshPerformanceBuild: 'true'
+        run: |
+          flutter build apk --release --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk PocketSSH-performance-arm64.apk
+          apksigner=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$apksigner" verify PocketSSH-performance-arm64.apk
+
+      - name: Upload ARM64 performance APK
+        if: github.ref_type == 'branch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketSSH-performance-arm64
+          path: PocketSSH-performance-arm64.apk
+          if-no-files-found: error
+          retention-days: 14
+
   ios:
     needs: verify
     if: github.event_name != 'pull_request'
@@ -282,6 +301,9 @@ jobs:
             echo '| --- | --- | --- |'
             echo '| Analysis and tests | ${{ needs.verify.result }} | |'
             echo '| Android ARM64 | ${{ needs.android.result }} | pocket-ssh-debug-arm64 |'
+            if [ "$GITHUB_REF_TYPE" = 'branch' ]; then
+              echo '| Android ARM64 performance | ${{ needs.android.result }} | PocketSSH-performance-arm64 |'
+            fi
             echo '| iOS | ${{ needs.ios.result }} | PocketSSH-iOS |'
             echo '| macOS | ${{ needs.macos.result }} | PocketSSH-macOS |'
             echo '| Windows x64 | ${{ needs.windows.result }} | PocketSSH-Windows-x64 |'

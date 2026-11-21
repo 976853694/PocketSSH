@@ -202,7 +202,7 @@ void main() {
     'remembered login can reuse and remove either credential type',
     () async {
       final store = AppStore(channel: channel);
-      final host = HostProfile(
+      var host = HostProfile(
         id: 'server',
         name: 'Server',
         host: 'host.example',
@@ -214,7 +214,13 @@ void main() {
       );
       expect((await store.credentials(host))?.password, 'fixture');
       expect(saved['state'], isNot(contains('fixture')));
-      host.keyAuth = true;
+      host = HostProfile(
+        id: 'server',
+        name: 'Server',
+        host: 'host.example',
+        auth: HostAuth.privateKey,
+      );
+      store.hosts[0] = host;
       await store.rememberCredentials(
         host,
         Credentials(
@@ -231,6 +237,56 @@ void main() {
       store.dispose();
     },
   );
+
+  test('host auth persists and old keyAuth states still load', () async {
+    saved['state'] = jsonEncode({
+      'hosts': [
+        {
+          'id': 'a',
+          'name': 'A',
+          'host': 'a.test',
+          'port': 22,
+          'username': 'a',
+          'keyAuth': true,
+        },
+        {
+          'id': 'b',
+          'name': 'B',
+          'host': 'b.test',
+          'port': 22,
+          'username': 'b',
+          'keyAuth': false,
+        },
+      ],
+    });
+    final store = AppStore(channel: channel);
+    await store.load();
+    expect(store.hosts.map((host) => host.auth), [
+      HostAuth.privateKey,
+      HostAuth.password,
+    ]);
+    final host = HostProfile(
+      id: 'test',
+      name: 'Test',
+      host: 'example.test',
+      auth: HostAuth.none,
+      remember: true,
+    );
+    store.hosts.add(host);
+    await store.rememberCredentials(
+      host,
+      Credentials(password: 'fixture', remember: true),
+    );
+    expect(await store.credentials(host), isNull);
+    expect(secrets, isEmpty);
+    await store.save();
+    final restored = AppStore(channel: channel);
+    await restored.load();
+    expect(restored.hosts.last.auth, HostAuth.none);
+    expect(restored.hosts.last.remember, isFalse);
+    restored.dispose();
+    store.dispose();
+  });
 
   test('AI context redacts private keys and common credential fields', () {
     final text = [

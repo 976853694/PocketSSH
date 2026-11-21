@@ -68,7 +68,8 @@ class _SftpPageState extends State<SftpPage> {
       });
       if (mounted) {
         setState(() {
-          entries = rows..removeWhere((e) => e.filename == '.');
+          entries = rows
+            ..removeWhere((e) => e.filename == '.' || e.filename == '..');
           directory = canonical;
         });
       }
@@ -531,7 +532,7 @@ class _SftpPageState extends State<SftpPage> {
           Expanded(
             child: loading
                 ? const Center(child: CircularProgressIndicator())
-                : entries.where((entry) => entry.filename != '..').isEmpty
+                : entries.isEmpty
                 ? Center(
                     child: Text(
                       '此目录为空',
@@ -542,16 +543,14 @@ class _SftpPageState extends State<SftpPage> {
                   )
                 : ListView.separated(
                     padding: const EdgeInsets.symmetric(horizontal: 14),
-                    itemCount: entries.where((e) => e.filename != '..').length,
+                    itemCount: entries.length,
                     separatorBuilder: (_, _) => Divider(
                       height: 1,
                       indent: 50,
                       color: colors.outlineVariant,
                     ),
                     itemBuilder: (context, index) {
-                      final entry = entries
-                          .where((e) => e.filename != '..')
-                          .elementAt(index);
+                      final entry = entries[index];
                       return ListTile(
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 8,

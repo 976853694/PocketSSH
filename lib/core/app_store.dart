@@ -6,6 +6,21 @@ import 'ai_endpoint.dart';
 import 'ai_headers.dart';
 import 'agent_context.dart';
 
+enum HostAuth {
+  password,
+  privateKey,
+  none;
+
+  static HostAuth decode(Object? value, {required bool legacyKeyAuth}) =>
+      switch (value) {
+        'password' => password,
+        'privateKey' => privateKey,
+        'none' => none,
+        null => legacyKeyAuth ? privateKey : password,
+        _ => throw const FormatException('不支持的 SSH 认证方式'),
+      };
+}
+
 class HostProfile {
   HostProfile({
     required this.id,
@@ -14,18 +29,19 @@ class HostProfile {
     this.port = 22,
     this.username = 'root',
     this.group = '',
-    this.keyAuth = false,
-    this.remember = false,
+    this.auth = HostAuth.password,
+    bool remember = false,
     this.lastUsed,
     this.jumpId,
     this.localForwardPort,
     this.forwardTargetHost = '127.0.0.1',
     this.forwardTargetPort = 5432,
-  });
+  }) : remember = auth != HostAuth.none && remember;
   final String id;
   String name, host, username, group;
   int port;
-  bool keyAuth, remember;
+  final HostAuth auth;
+  bool remember;
   DateTime? lastUsed;
   String? jumpId;
   int? localForwardPort;
@@ -38,7 +54,7 @@ class HostProfile {
     'port': port,
     'username': username,
     'group': group,
-    'keyAuth': keyAuth,
+    'auth': auth.name,
     'remember': remember,
     'lastUsed': lastUsed?.toIso8601String(),
     'jumpId': jumpId,
@@ -53,7 +69,7 @@ class HostProfile {
     port: j['port'] as int,
     username: j['username'] as String,
     group: j['group'] as String? ?? '',
-    keyAuth: j['keyAuth'] == true,
+    auth: HostAuth.decode(j['auth'], legacyKeyAuth: j['keyAuth'] == true),
     remember: j['remember'] == true,
     lastUsed: DateTime.tryParse(j['lastUsed'] as String? ?? ''),
     jumpId: j['jumpId'] as String?,
@@ -85,8 +101,12 @@ class Credentials {
 }
 
 class AppStore extends ChangeNotifier {
-  AppStore({this.channel = nativeDeviceChannel});
+  AppStore({this.channel = nativeDeviceChannel, bool loading = false})
+    : _loading = loading;
   final MethodChannel channel;
+  bool _loading;
+  bool get loading => _loading;
+  bool _disposed = false;
   DeviceBridge get _device => DeviceBridge(channel: channel);
   final List<HostProfile> hosts = [];
   final List<String> snippets = [];
@@ -117,6 +137,7 @@ class AppStore extends ChangeNotifier {
   Future<void> load() async {
     try {
       final raw = await _device.invokeMethod<String>('loadState');
+      if (_disposed) return;
       if (raw != null) {
         final j = jsonDecode(raw) as Map<String, dynamic>;
         hosts.addAll(
@@ -162,7 +183,14 @@ class AppStore extends ChangeNotifier {
     } catch (_) {
       error = '无法读取本地配置，请检查应用存储。';
     }
-    notifyListeners();
+    _loading = false;
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
   }
 
   Future<void> save() async {
@@ -244,7 +272,7 @@ class AppStore extends ChangeNotifier {
     HostProfile host, {
     bool authenticate = true,
   }) async {
-    if (!host.remember) return null;
+    if (host.auth == HostAuth.none || !host.remember) return null;
     if (authenticate && !await unlock()) throw StateError('设备认证已取消');
     final raw = await secret('host:${host.id}');
     return raw == null
@@ -258,11 +286,12 @@ class AppStore extends ChangeNotifier {
   ) async {
     final profile = hosts.where((item) => item.id == host.id).firstOrNull;
     if (profile == null ||
+        host.auth == HostAuth.none ||
         credentials.remember == null ||
         profile.host != host.host ||
         profile.port != host.port ||
         profile.username != host.username ||
-        profile.keyAuth != host.keyAuth) {
+        profile.auth != host.auth) {
       return;
     }
     final remember = credentials.remember!;

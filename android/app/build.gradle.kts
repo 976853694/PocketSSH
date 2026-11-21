@@ -33,6 +33,8 @@ android {
             val hasReleaseSigning = !System.getenv("ANDROID_KEYSTORE_PATH").isNullOrBlank()
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
+            } else if (providers.gradleProperty("pocketsshPerformanceBuild").orNull == "true") {
+                signingConfig = signingConfigs.getByName("debug")
             }
         }
     }

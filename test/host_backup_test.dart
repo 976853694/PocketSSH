@@ -12,7 +12,7 @@ void main() {
         host: 'example.test',
         port: 2222,
         username: 'ops',
-        keyAuth: true,
+        auth: HostAuth.privateKey,
         remember: true,
         jumpId: 'jump',
       );
@@ -22,10 +22,25 @@ void main() {
       final restored = importHosts(backup).single;
       expect(restored.id, isNot(source.id));
       expect(restored.port, 2222);
-      expect(restored.keyAuth, isTrue);
+      expect(restored.auth, HostAuth.privateKey);
       expect(restored.remember, isFalse);
     },
   );
+
+  test('backup preserves none authentication and imports old key profiles', () {
+    final host = HostProfile(
+      id: 'local',
+      name: 'Example',
+      host: 'example.test',
+      auth: HostAuth.none,
+    );
+    expect(importHosts(exportHosts([host])).single.auth, HostAuth.none);
+    final legacy = importHosts('''
+      {"version":1,"hosts":[{"name":"Old","host":"example.test",
+      "port":22,"username":"ops","keyAuth":true}]}
+    ''').single;
+    expect(legacy.auth, HostAuth.privateKey);
+  });
 
   test('profile import rejects invalid target ports', () {
     final backup = exportHosts([

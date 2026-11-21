@@ -92,7 +92,7 @@ class WorkspaceSession extends ChangeNotifier {
       SshConnection conn,
       SshTarget t,
       Credentials c,
-      bool key, {
+      HostAuth auth, {
       Future<SSHSocket> Function()? dial,
       bool shell = true,
       Future<void> Function()? onAuthenticated,
@@ -102,9 +102,11 @@ class WorkspaceSession extends ChangeNotifier {
           verify: (type, fingerprint) => verify(t, type, fingerprint),
           columns: terminal.viewWidth,
           rows: terminal.viewHeight,
-          password: key ? null : c.password,
-          privateKey: key ? utf8.encode(c.key) : null,
-          passphrase: c.passphrase.isEmpty ? null : c.passphrase,
+          password: auth == HostAuth.password ? c.password : null,
+          privateKey: auth == HostAuth.privateKey ? utf8.encode(c.key) : null,
+          passphrase: auth == HostAuth.privateKey && c.passphrase.isNotEmpty
+              ? c.passphrase
+              : null,
           dial: dial,
           interactive: shell,
           onStage: (stage) {
@@ -113,6 +115,12 @@ class WorkspaceSession extends ChangeNotifier {
             notifyListeners();
           },
         )
+        .onError<SSHAuthFailError>((error, stack) {
+          if (auth == HostAuth.none) {
+            throw const FormatException('服务器未接受无凭据认证，请检查用户名或改用密码、私钥。');
+          }
+          Error.throwWithStackTrace(error, stack);
+        })
         .then((session) async {
           if (onAuthenticated != null && !conn.isClosed) {
             await onAuthenticated();
@@ -125,7 +133,7 @@ class WorkspaceSession extends ChangeNotifier {
           _jump,
           SshTarget(jump.host, jump.port, jump.username),
           jumpCredentials!,
-          jump.keyAuth,
+          jump.auth,
           shell: false,
           onAuthenticated: onJumpAuthenticated,
         );
@@ -135,7 +143,7 @@ class WorkspaceSession extends ChangeNotifier {
         connection,
         target,
         credentials,
-        profile.keyAuth,
+        profile.auth,
         dial: jump == null
             ? null
             : () => _jump

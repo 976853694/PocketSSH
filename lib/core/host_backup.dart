@@ -4,7 +4,7 @@ import 'app_store.dart';
 import 'ssh_connection.dart';
 
 String exportHosts(Iterable<HostProfile> hosts) => jsonEncode({
-  'version': 1,
+  'version': 2,
   'hosts': [
     for (final host in hosts)
       {
@@ -13,7 +13,7 @@ String exportHosts(Iterable<HostProfile> hosts) => jsonEncode({
         'port': host.port,
         'username': host.username,
         'group': host.group,
-        'keyAuth': host.keyAuth,
+        'auth': host.auth.name,
       },
   ],
 });
@@ -21,9 +21,9 @@ String exportHosts(Iterable<HostProfile> hosts) => jsonEncode({
 List<HostProfile> importHosts(String input) {
   if (input.length > 512 * 1024) throw const FormatException();
   final data = jsonDecode(input);
-  if (data is! Map || data['version'] != 1 || data['hosts'] is! List) {
-    throw const FormatException();
-  }
+  if (data is! Map || data['hosts'] is! List) throw const FormatException();
+  final version = data['version'];
+  if (version != 1 && version != 2) throw const FormatException();
   final rows = data['hosts'] as List;
   if (rows.length > 1000) throw const FormatException();
   final idPrefix = DateTime.now().microsecondsSinceEpoch;
@@ -48,7 +48,7 @@ List<HostProfile> importHosts(String input) {
         port is! int ||
         port < 1 ||
         port > 65535 ||
-        row['keyAuth'] is! bool) {
+        (version == 1 ? row['keyAuth'] is! bool : row['auth'] is! String)) {
       throw const FormatException();
     }
     result.add(
@@ -59,7 +59,10 @@ List<HostProfile> importHosts(String input) {
         port: port,
         username: field('username'),
         group: field('group', optional: true),
-        keyAuth: row['keyAuth'] as bool,
+        auth: HostAuth.decode(
+          version == 1 ? null : row['auth'],
+          legacyKeyAuth: row['keyAuth'] == true,
+        ),
       ),
     );
   }

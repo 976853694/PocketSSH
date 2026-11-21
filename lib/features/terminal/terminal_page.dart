@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:xterm2/xterm.dart';
 import '../../core/app_palette.dart';
@@ -10,6 +9,7 @@ import '../../core/ssh_connection.dart';
 import '../connection/connection_page.dart';
 import 'ai_panel.dart';
 import 'sftp_page.dart';
+import 'terminal_selection.dart';
 
 class TerminalPage extends StatefulWidget {
   const TerminalPage({
@@ -36,15 +36,13 @@ class TerminalPage extends StatefulWidget {
 class _TerminalPageState extends State<TerminalPage> {
   final view = GlobalKey<TerminalViewState>();
   final controller = TerminalController();
+  final terminalFocus = FocusNode();
   final draftController = TextEditingController();
   final searchField = TextEditingController();
   WorkspaceSession get session => widget.session;
-  String draft = '';
   bool _confirmingDraft = false;
-  Timer? _terminalPressTimer;
-  int? _terminalPressPointer;
-  Offset? _terminalPressStart;
-  bool _terminalLongPress = false, _terminalMenuOpen = false;
+  ({bool dark, Color cursor})? _themeKey;
+  late TerminalTheme _theme;
   bool search = false;
   List<TerminalSearchMatch> matches = [];
   int match = 0;
@@ -56,10 +54,6 @@ class _TerminalPageState extends State<TerminalPage> {
   void initState() {
     super.initState();
     session.addListener(update);
-    draftController.addListener(() {
-      final value = draftController.text;
-      if (draft != value) setState(() => draft = value);
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || session.connected || session.opening) return;
       if (widget.directCredentials != null) {
@@ -209,8 +203,15 @@ class _TerminalPageState extends State<TerminalPage> {
     if (selected == null) return;
     final value = session.terminal.buffer.getText(selected, true);
     if (value.isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: value));
-    if (mounted) controller.clearSelection();
+    try {
+      await Clipboard.setData(ClipboardData(text: value));
+      if (mounted &&
+          controller.selectionFor(session.terminal.buffer) == selected) {
+        controller.clearSelection();
+      }
+    } catch (_) {
+      if (mounted) _notice('无法访问剪贴板，请重试。');
+    }
   }
 
   Future<void> _openAi([String? text]) async {
@@ -238,7 +239,7 @@ class _TerminalPageState extends State<TerminalPage> {
   }
 
   Future<void> _saveDraft() async {
-    final controller = TextEditingController(text: draft);
+    final controller = TextEditingController(text: draftController.text);
     final value = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -335,86 +336,16 @@ class _TerminalPageState extends State<TerminalPage> {
     );
   }
 
-  void _cancelTerminalPress() {
-    _terminalPressTimer?.cancel();
-    _terminalPressTimer = null;
-    _terminalPressPointer = null;
-    _terminalPressStart = null;
-    _terminalLongPress = false;
-  }
-
-  void _onTerminalPointerDown(PointerDownEvent event) {
-    if (event.kind != PointerDeviceKind.touch || _terminalMenuOpen) return;
-    if (_terminalPressPointer != null) {
-      _cancelTerminalPress();
-      return;
-    }
-    _terminalPressPointer = event.pointer;
-    _terminalPressStart = event.position;
-    _terminalPressTimer = Timer(
-      kLongPressTimeout,
-      () => _terminalLongPress = true,
-    );
-  }
-
-  void _onTerminalPointerMove(PointerMoveEvent event) {
-    if (event.pointer != _terminalPressPointer || _terminalLongPress) return;
-    if ((event.position - _terminalPressStart!).distance > kTouchSlop) {
-      _cancelTerminalPress();
-    }
-  }
-
-  void _onTerminalPointerUp(PointerUpEvent event) {
-    if (event.pointer != _terminalPressPointer) return;
-    final showMenu = _terminalLongPress;
-    _cancelTerminalPress();
-    if (showMenu) unawaited(_showTerminalClipboardMenu(event.position));
-  }
-
-  Future<void> _showTerminalClipboardMenu(Offset position) async {
-    if (!mounted || _terminalMenuOpen) return;
-    final overlay =
-        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
-    final localPosition = overlay.globalToLocal(position);
-    final selection = controller.selectionFor(session.terminal.buffer);
-    final canCopy =
-        selection != null &&
-        session.terminal.buffer.getText(selection, true).isNotEmpty;
-    _terminalMenuOpen = true;
-    try {
-      final action = await showMenu<String>(
-        context: context,
-        position: RelativeRect.fromRect(
-          Rect.fromLTWH(localPosition.dx, localPosition.dy, 0, 0),
-          Offset.zero & overlay.size,
-        ),
-        items: [
-          PopupMenuItem(
-            value: 'copy',
-            enabled: canCopy,
-            child: const Text('复制'),
-          ),
-          PopupMenuItem(
-            value: 'paste',
-            enabled: session.connected,
-            child: const Text('粘贴'),
-          ),
-        ],
-      );
-      if (!mounted) return;
-      if (action == 'copy') await _copySelection();
-      if (action == 'paste') await _paste();
-    } catch (_) {
-      if (mounted) _notice('无法访问剪贴板，请重试。');
-    } finally {
-      _terminalMenuOpen = false;
-    }
-  }
-
   Future<void> _paste() async {
     if (!session.connected) return;
     final connection = session.connection;
-    final text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    String? text;
+    try {
+      text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    } catch (_) {
+      if (mounted) _notice('无法访问剪贴板，请重试。');
+      return;
+    }
     if (!mounted ||
         !session.connected ||
         !identical(connection, session.connection) ||
@@ -429,7 +360,7 @@ class _TerminalPageState extends State<TerminalPage> {
   @override
   void dispose() {
     session.removeListener(update);
-    _cancelTerminalPress();
+    terminalFocus.dispose();
     controller.dispose();
     draftController.dispose();
     searchField.dispose();
@@ -439,18 +370,18 @@ class _TerminalPageState extends State<TerminalPage> {
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final dark = widget.store.terminalTheme == 'dark';
+  TerminalTheme _terminalTheme(bool dark, Color cursor) {
+    final key = (dark: dark, cursor: cursor);
+    if (_themeKey == key) return _theme;
+    _themeKey = key;
     final foreground = dark
         ? AppPalette.terminalDarkForeground
         : AppPalette.terminalLightForeground;
     final background = dark
         ? AppPalette.terminalDarkBackground
         : AppPalette.terminalLightBackground;
-    final theme = TerminalTheme(
-      cursor: colors.primary,
+    return _theme = TerminalTheme(
+      cursor: cursor,
       selection: AppPalette.terminalSelection.withValues(alpha: .4),
       foreground: foreground,
       background: background,
@@ -478,7 +409,13 @@ class _TerminalPageState extends State<TerminalPage> {
       searchHitBackgroundCurrent: AppPalette.terminalSearchCurrent,
       searchHitForeground: Colors.black,
     );
+  }
 
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final dark = widget.store.terminalTheme == 'dark';
+    final theme = _terminalTheme(dark, colors.primary);
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.surface,
@@ -616,23 +553,24 @@ class _TerminalPageState extends State<TerminalPage> {
           if (!session.connected && !session.finished)
             const LinearProgressIndicator(minHeight: 2),
           Expanded(
-            child: Container(
-              color: background,
-              child: Listener(
-                onPointerDown: _onTerminalPointerDown,
-                onPointerMove: _onTerminalPointerMove,
-                onPointerUp: _onTerminalPointerUp,
-                onPointerCancel: (_) => _cancelTerminalPress(),
-                child: TerminalView(
-                  session.terminal,
-                  key: view,
-                  controller: controller,
-                  theme: theme,
-                  textStyle: TerminalStyle(fontSize: widget.store.fontSize),
-                  padding: const EdgeInsets.all(10),
-                  readOnly: !session.connected,
-                  onPaste: _paste,
-                ),
+            child: TerminalSelection(
+              terminal: session.terminal,
+              controller: controller,
+              viewKey: view,
+              focusNode: terminalFocus,
+              connected: session.connected,
+              onCopy: _copySelection,
+              onPaste: _paste,
+              child: TerminalView(
+                session.terminal,
+                key: view,
+                controller: controller,
+                focusNode: terminalFocus,
+                theme: theme,
+                textStyle: TerminalStyle(fontSize: widget.store.fontSize),
+                padding: const EdgeInsets.all(10),
+                readOnly: !session.connected,
+                onPaste: _paste,
               ),
             ),
           ),
@@ -711,11 +649,15 @@ class _TerminalPageState extends State<TerminalPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: draft.trim().isEmpty
-                        ? null
-                        : () => _sendDraft(draft),
-                    icon: const Icon(Icons.send),
+                  ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: draftController,
+                    builder: (context, draft, icon) => IconButton.filled(
+                      onPressed: draft.text.trim().isEmpty
+                          ? null
+                          : () => _sendDraft(draft.text),
+                      icon: icon!,
+                    ),
+                    child: const Icon(Icons.send),
                   ),
                 ],
               ),

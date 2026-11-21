@@ -1,6 +1,10 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pocket_ssh/core/app_store.dart';
+import 'package:pocket_ssh/core/device_bridge.dart';
 import 'package:pocket_ssh/core/sessions.dart';
 import 'package:pocket_ssh/core/ssh_connection.dart';
 import 'package:pocket_ssh/features/connection/connection_page.dart';
@@ -68,6 +72,89 @@ void main() {
       expect(find.text('字体大小 · 14 px'), findsOneWidget);
       sessions.dispose();
       store.dispose();
+    },
+  );
+
+  testWidgets('first frame shows the workspace while device settings load', (
+    tester,
+  ) async {
+    final state = Completer<String?>();
+    var workspaceWasBuilt = false;
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(nativeDeviceChannel, (call) async {
+      expect(call.method, 'loadState');
+      workspaceWasBuilt = find.text('连接工作台').evaluate().isNotEmpty;
+      return state.future;
+    });
+    addTearDown(
+      () => messenger.setMockMethodCallHandler(nativeDeviceChannel, null),
+    );
+    await tester.pumpWidget(const PocketSshApp());
+    expect(workspaceWasBuilt, isTrue);
+    expect(find.text('正在读取主机配置…'), findsOneWidget);
+    final quick = find.ancestor(
+      of: find.text('快速连接'),
+      matching: find.byWidgetPredicate((widget) => widget is FilledButton),
+    );
+    expect(tester.widget<FilledButton>(quick).onPressed, isNull);
+    final settings = find.byWidgetPredicate(
+      (widget) => widget is IconButton && widget.tooltip == '设置',
+    );
+    expect(tester.widget<IconButton>(settings).onPressed, isNull);
+    expect(find.byType(CustomScrollView, skipOffstage: false), findsOneWidget);
+
+    state.complete(
+      jsonEncode({
+        'theme': 'dark',
+        'hosts': [
+          HostProfile(id: 'a', name: 'Saved Host', host: 'a.test').toJson(),
+        ],
+      }),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('正在读取主机配置…'), findsNothing);
+    expect(find.text('Saved Host'), findsOneWidget);
+    expect(tester.widget<FilledButton>(quick).onPressed, isNotNull);
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.dark,
+    );
+  });
+
+  testWidgets(
+    'host search is restored after lazily switching workspace pages',
+    (tester) async {
+      final store = AppStore()
+        ..hosts.addAll([
+          HostProfile(id: 'one', name: 'Alpha host', host: 'one.test'),
+          HostProfile(id: 'two', name: 'Beta host', host: 'two.test'),
+        ]);
+      final sessions = Sessions();
+      addTearDown(store.dispose);
+      addTearDown(sessions.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PocketHome(store: store, sessions: sessions),
+        ),
+      );
+      final search = find.byType(TextField);
+      await tester.enterText(search, 'Beta');
+      await tester.pumpAndSettle();
+      expect(find.text('Alpha host'), findsNothing);
+      Finder tab(String title) => find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text(title),
+      );
+      await tester.tap(tab('文件'));
+      await tester.pumpAndSettle();
+      expect(search, findsNothing);
+      await tester.tap(tab('主机'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(search).controller!.text, 'Beta');
+      expect(find.text('Beta host'), findsOneWidget);
+      expect(find.text('Alpha host'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
@@ -142,6 +229,58 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('高级连接'), findsOneWidget);
     sessions.dispose();
+    store.dispose();
+  });
+
+  testWidgets('no-credential access has no secret prompt or remember toggle', (
+    tester,
+  ) async {
+    final store = AppStore();
+    HostProfile? profile;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () async {
+                profile = await Navigator.of(context).push<HostProfile>(
+                  MaterialPageRoute(
+                    builder: (_) => const ConnectionPage(quick: true),
+                  ),
+                );
+                if (context.mounted && profile != null) {
+                  final credentials = await requestCredentials(
+                    context,
+                    profile!,
+                    store,
+                  );
+                  expect(credentials?.password, isEmpty);
+                  expect(credentials?.key, isEmpty);
+                }
+              },
+              child: const Text('开始'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('开始'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, '服务器地址'),
+      'example.test',
+    );
+    await tester.enterText(find.widgetWithText(TextFormField, '用户名'), 'ops');
+    await tester.tap(find.text('无凭据'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('仍会校验主机指纹'), findsOneWidget);
+    expect(find.text('加密保存凭据'), findsNothing);
+    await tester.ensureVisible(find.text('连接'));
+    await tester.tap(find.text('连接'));
+    await tester.pumpAndSettle();
+    expect(profile?.auth, HostAuth.none);
+    expect(profile?.remember, isFalse);
+    expect(find.byType(AlertDialog), findsNothing);
     store.dispose();
   });
 
