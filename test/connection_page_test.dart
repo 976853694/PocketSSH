@@ -8,7 +8,11 @@ import 'package:pocket_ssh/core/device_bridge.dart';
 import 'package:pocket_ssh/core/sessions.dart';
 import 'package:pocket_ssh/core/ssh_connection.dart';
 import 'package:pocket_ssh/features/connection/connection_page.dart';
+import 'package:pocket_ssh/features/terminal/terminal_page.dart';
 import 'package:pocket_ssh/main.dart';
+
+Finder _bottomTab(String label) =>
+    find.descendant(of: find.byType(NavigationBar), matching: find.text(label));
 
 void main() {
   test('normalizes host names and formats IPv6 endpoints with their ports', () {
@@ -20,60 +24,70 @@ void main() {
     expect(normalizeHost('server.example:22'), isNull);
   });
 
-  testWidgets(
-    'home exposes host, session and file navigation with settings categories',
-    (tester) async {
-      tester.view.physicalSize = const Size(360, 800);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final store = AppStore();
-      final sessions = Sessions();
-      await tester.pumpWidget(
-        MaterialApp(
-          home: PocketHome(store: store, sessions: sessions),
-        ),
-      );
-      expect(find.text('连接工作台'), findsOneWidget);
-      expect(find.text('远程访问  /  SSH'), findsOneWidget);
-      expect(find.byType(Card), findsNothing);
-      expect(find.text('你的服务器，随时就绪。'), findsNothing);
-      expect(find.text('主机'), findsNWidgets(2));
-      expect(find.text('会话'), findsOneWidget);
-      expect(find.text('文件'), findsOneWidget);
-      expect(find.text('你的服务器，随时就绪。'), findsNothing);
-      expect(find.text('远程访问  /  SSH'), findsOneWidget);
-      expect(find.text('快速连接'), findsOneWidget);
-      await tester.tap(find.text('文件').first);
-      await tester.pumpAndSettle();
-      expect(find.text('远程文件'), findsOneWidget);
-      expect(find.text('选择主机，浏览和传输远程文件。'), findsOneWidget);
-      await tester.tap(find.text('主机').first);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('设置'));
-      await tester.pumpAndSettle();
-      expect(find.text('外观'), findsOneWidget);
-      expect(find.text('终端'), findsOneWidget);
-      expect(find.text('AI 助手'), findsOneWidget);
-      expect(find.text('安全与隐私'), findsOneWidget);
-      await tester.tap(find.text('外观'));
-      await tester.pumpAndSettle();
-      expect(find.text('应用主题'), findsOneWidget);
-      expect(find.text('系统模式会跟随设备浅色或深色外观。'), findsOneWidget);
-      await tester.pageBack();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('AI 助手'));
-      await tester.pumpAndSettle();
-      expect(find.text('接口类型'), findsOneWidget);
-      await tester.pageBack();
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('终端'));
-      await tester.pumpAndSettle();
-      expect(find.text('字体大小 · 14 px'), findsOneWidget);
-      sessions.dispose();
-      store.dispose();
-    },
-  );
+  testWidgets('mobile navigation opens hosts, files and settings in order', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AppStore();
+    final sessions = Sessions();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    expect(find.text('连接工作台'), findsOneWidget);
+    expect(find.text('远程访问  /  SSH'), findsOneWidget);
+    expect(find.byType(Card), findsNothing);
+    expect(find.text('你的服务器，随时就绪。'), findsNothing);
+    final bar = find.byType(NavigationBar);
+    expect(
+      tester
+          .widget<NavigationBar>(bar)
+          .destinations
+          .cast<NavigationDestination>()
+          .map((item) => item.label),
+      ['主机', '文件', '设置'],
+    );
+    expect(find.text('快速连接'), findsOneWidget);
+    await tester.tap(_bottomTab('文件'));
+    await tester.pumpAndSettle();
+    expect(find.text('远程文件'), findsOneWidget);
+    expect(find.text('选择主机，浏览和传输远程文件。'), findsOneWidget);
+    await tester.tap(_bottomTab('设置'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<NavigationBar>(bar).selectedIndex, 2);
+    expect(find.byType(BackButton), findsNothing);
+    expect(find.text('外观'), findsOneWidget);
+    expect(find.text('终端'), findsOneWidget);
+    expect(find.text('AI 助手'), findsOneWidget);
+    expect(find.text('安全与隐私'), findsOneWidget);
+    await tester.tap(find.text('外观'));
+    await tester.pumpAndSettle();
+    expect(find.text('应用主题'), findsOneWidget);
+    expect(find.text('系统模式会跟随设备浅色或深色外观。'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('AI 助手'));
+    await tester.pumpAndSettle();
+    expect(find.text('接口类型'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('终端'));
+    await tester.pumpAndSettle();
+    expect(find.text('字体大小 · 14 px'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(tester.widget<NavigationBar>(bar).selectedIndex, 2);
+    await tester.tap(_bottomTab('主机'));
+    await tester.pumpAndSettle();
+    expect(find.text('连接工作台'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    sessions.dispose();
+    store.dispose();
+  });
 
   testWidgets('first frame shows the workspace while device settings load', (
     tester,
@@ -98,11 +112,11 @@ void main() {
       matching: find.byWidgetPredicate((widget) => widget is FilledButton),
     );
     expect(tester.widget<FilledButton>(quick).onPressed, isNull);
-    final settings = find.byWidgetPredicate(
-      (widget) => widget is IconButton && widget.tooltip == '设置',
-    );
-    expect(tester.widget<IconButton>(settings).onPressed, isNull);
     expect(find.byType(CustomScrollView, skipOffstage: false), findsOneWidget);
+    await tester.tap(_bottomTab('设置'));
+    await tester.pumpAndSettle();
+    expect(find.text('正在读取设置…'), findsOneWidget);
+    expect(find.text('外观'), findsNothing);
 
     state.complete(
       jsonEncode({
@@ -112,6 +126,10 @@ void main() {
         ],
       }),
     );
+    await tester.pumpAndSettle();
+    expect(find.text('正在读取设置…'), findsNothing);
+    expect(find.text('外观'), findsOneWidget);
+    await tester.tap(_bottomTab('主机'));
     await tester.pumpAndSettle();
     expect(find.text('正在读取主机配置…'), findsNothing);
     expect(find.text('Saved Host'), findsOneWidget);
@@ -142,14 +160,10 @@ void main() {
       await tester.enterText(search, 'Beta');
       await tester.pumpAndSettle();
       expect(find.text('Alpha host'), findsNothing);
-      Finder tab(String title) => find.descendant(
-        of: find.byType(NavigationBar),
-        matching: find.text(title),
-      );
-      await tester.tap(tab('文件'));
+      await tester.tap(_bottomTab('文件'));
       await tester.pumpAndSettle();
       expect(search, findsNothing);
-      await tester.tap(tab('主机'));
+      await tester.tap(_bottomTab('主机'));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(search).controller!.text, 'Beta');
       expect(find.text('Beta host'), findsOneWidget);
@@ -172,11 +186,154 @@ void main() {
         home: PocketHome(store: store, sessions: sessions),
       ),
     );
-    expect(find.byType(NavigationRail), findsOneWidget);
+    final rail = find.byType(NavigationRail);
     expect(find.byType(NavigationBar), findsNothing);
+    expect(
+      tester
+          .widget<NavigationRail>(rail)
+          .destinations
+          .map((item) => (item.label as Text).data),
+      ['主机', '文件', '设置'],
+    );
+    await tester.tap(find.descendant(of: rail, matching: find.text('设置')));
+    await tester.pumpAndSettle();
+    expect(find.text('配置备份'), findsOneWidget);
+    expect(tester.widget<NavigationRail>(rail).selectedIndex, 2);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
     sessions.dispose();
     store.dispose();
+  });
+
+  testWidgets('terminal connections do not add rows to the files tab', (
+    tester,
+  ) async {
+    final host = HostProfile(
+      id: 'saved',
+      name: 'Office host',
+      host: 'office.test',
+    );
+    final store = AppStore()..hosts.add(host);
+    final sessions = Sessions();
+    final opened = <WorkspaceSession>[];
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      sessions.dispose();
+      for (final session in opened) {
+        session.dispose();
+      }
+      store.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    await tester.tap(_bottomTab('文件'));
+    await tester.pumpAndSettle();
+    expect(find.text('Office host'), findsOneWidget);
+
+    for (var i = 0; i < 3; i++) {
+      final session = WorkspaceSession(host, store.scrollback)
+        ..connected = true;
+      opened.add(session);
+      sessions.add(session);
+      if (i == 1) session.stop();
+      await tester.pump();
+      expect(find.byType(ListTile), findsOneWidget);
+      expect(find.text('Office host'), findsOneWidget);
+    }
+    expect(find.text('传输任务'), findsNothing);
+  });
+
+  testWidgets(
+    'files tab shows only real transfer tasks for quick connections',
+    (tester) async {
+      final store = AppStore();
+      final host = HostProfile(
+        id: 'quick',
+        name: 'Quick host',
+        host: 'quick.test',
+      );
+      final session = WorkspaceSession(host, store.scrollback)
+        ..connected = true;
+      final sessions = Sessions()..add(session);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        sessions.dispose();
+        session.dispose();
+        store.dispose();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PocketHome(store: store, sessions: sessions),
+        ),
+      );
+      await tester.tap(_bottomTab('文件'));
+      await tester.pumpAndSettle();
+      expect(find.text('还没有可浏览的主机'), findsOneWidget);
+      expect(find.byType(ListTile), findsNothing);
+
+      session
+        ..transferStatus = '上传 report.txt'
+        ..transferBytes = 1024
+        ..transferTotal = 2048
+        ..updateTransfer();
+      await tester.pump();
+      expect(find.text('传输任务'), findsOneWidget);
+      expect(find.text('上传 report.txt'), findsOneWidget);
+      expect(
+        tester
+            .widget<LinearProgressIndicator>(
+              find.byType(LinearProgressIndicator),
+            )
+            .value,
+        .5,
+      );
+
+      session
+        ..transferStatus = null
+        ..updateTransfer();
+      await tester.pump();
+      expect(find.text('传输任务'), findsNothing);
+      expect(find.text('还没有可浏览的主机'), findsOneWidget);
+      expect(find.byType(ListTile), findsNothing);
+    },
+  );
+
+  testWidgets('opening an already connected host reuses its terminal', (
+    tester,
+  ) async {
+    final host = HostProfile(
+      id: 'prod',
+      name: 'Production',
+      host: 'example.test',
+    );
+    final store = AppStore()..hosts.add(host);
+    final session = WorkspaceSession(host, store.scrollback)..connected = true;
+    final sessions = Sessions()..add(session);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      sessions.dispose();
+      session.dispose();
+      store.dispose();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    await tester.tap(find.byTooltip('连接 Production'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TerminalPage>(find.byType(TerminalPage)).session,
+      same(session),
+    );
+    expect(find.byType(AlertDialog), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(sessions.items, [session]);
+    expect(session.connected, isTrue);
   });
 
   testWidgets('host list action buttons fit on a narrow screen', (

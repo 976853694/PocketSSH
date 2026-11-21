@@ -271,6 +271,15 @@ class _PocketHomeState extends State<PocketHome> {
     if (connecting) return;
     setState(() => connecting = true);
     try {
+      if (!sftp && !replaceCredentials) {
+        final active = widget.sessions.items
+            .where((item) => identical(item.profile, host) && item.connected)
+            .firstOrNull;
+        if (active != null) {
+          await openSession(active);
+          return;
+        }
+      }
       if (sftp) {
         final active = widget.sessions.items
             .where((item) => item.profile.id == host.id && item.connected)
@@ -341,17 +350,10 @@ class _PocketHomeState extends State<PocketHome> {
         session.stop();
         return;
       }
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => TerminalPage(
-            session: session,
-            store: widget.store,
-            sessions: widget.sessions,
-            verify: verify,
-            directCredentials: credentials,
-            directJumpCredentials: jumpCredentials,
-          ),
-        ),
+      await openSession(
+        session,
+        credentials: credentials,
+        jumpCredentials: jumpCredentials,
       );
     } catch (error) {
       if (mounted) {
@@ -409,32 +411,23 @@ class _PocketHomeState extends State<PocketHome> {
     );
   }
 
-  void openSettings() {
-    Navigator.push<void>(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => SettingsPage(
-          store: widget.store,
-          onImportHosts: () => transferProfiles('import'),
-          onExportHosts: () => transferProfiles('export'),
-        ),
+  Future<void> openSession(
+    WorkspaceSession session, {
+    Credentials? credentials,
+    Credentials? jumpCredentials,
+  }) => Navigator.push<void>(
+    context,
+    MaterialPageRoute<void>(
+      builder: (_) => TerminalPage(
+        session: session,
+        store: widget.store,
+        sessions: widget.sessions,
+        verify: verify,
+        directCredentials: credentials,
+        directJumpCredentials: jumpCredentials,
       ),
-    );
-  }
-
-  void openSession(WorkspaceSession session) {
-    Navigator.push<void>(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => TerminalPage(
-          session: session,
-          store: widget.store,
-          sessions: widget.sessions,
-          verify: verify,
-        ),
-      ),
-    );
-  }
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -446,8 +439,12 @@ class _PocketHomeState extends State<PocketHome> {
           key: ValueKey(tab),
           child: switch (tab) {
             0 => hostsPage(),
-            1 => sessionsPage(),
-            _ => transfersPage(),
+            1 => transfersPage(),
+            _ => SettingsPage(
+              store: widget.store,
+              onImportHosts: () => transferProfiles('import'),
+              onExportHosts: () => transferProfiles('export'),
+            ),
           },
         ),
       ),
@@ -470,12 +467,12 @@ class _PocketHomeState extends State<PocketHome> {
                         label: Text('主机'),
                       ),
                       NavigationRailDestination(
-                        icon: Icon(Icons.terminal),
-                        label: Text('会话'),
-                      ),
-                      NavigationRailDestination(
                         icon: Icon(Icons.folder_open_outlined),
                         label: Text('文件'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.settings_outlined),
+                        label: Text('设置'),
                       ),
                     ],
                   ),
@@ -499,10 +496,14 @@ class _PocketHomeState extends State<PocketHome> {
                   selectedIcon: Icon(Icons.dns),
                   label: '主机',
                 ),
-                NavigationDestination(icon: Icon(Icons.terminal), label: '会话'),
                 NavigationDestination(
                   icon: Icon(Icons.folder_open_outlined),
                   label: '文件',
+                ),
+                NavigationDestination(
+                  icon: Icon(Icons.settings_outlined),
+                  selectedIcon: Icon(Icons.settings),
+                  label: '设置',
                 ),
               ],
             ),
@@ -587,17 +588,7 @@ class _PocketHomeState extends State<PocketHome> {
     return CustomScrollView(
       key: const PageStorageKey('hosts'),
       slivers: [
-        SliverAppBar(
-          floating: true,
-          title: const Text('主机'),
-          actions: [
-            IconButton(
-              onPressed: widget.store.loading ? null : openSettings,
-              tooltip: '设置',
-              icon: const Icon(Icons.settings_outlined),
-            ),
-          ],
-        ),
+        const SliverAppBar(floating: true, title: Text('主机')),
         SliverPadding(
           padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
           sliver: SliverToBoxAdapter(
@@ -779,47 +770,35 @@ class _PocketHomeState extends State<PocketHome> {
     if (confirmed == true) await const HostTrust().forget(endpoint);
   }
 
-  Widget sessionsPage() => CustomScrollView(
-    key: const PageStorageKey('sessions'),
-    slivers: [
-      SliverAppBar(
-        floating: true,
-        title: const Text('会话'),
-        actions: [
-          IconButton(
-            tooltip: '设置',
-            onPressed: widget.store.loading ? null : openSettings,
-            icon: const Icon(Icons.settings_outlined),
-          ),
-        ],
-      ),
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-        sliver: SliverToBoxAdapter(
-          child: _PageIntro(
-            eyebrow: '实时状态',
-            title: '会话',
-            subtitle: '管理正在运行的 SSH 终端。',
-            trailing:
-                '${widget.sessions.items.where((s) => s.connected).length} 在线',
+  Widget transfersPage() {
+    final transfers = [
+      for (final session in widget.sessions.items)
+        if (session.transferStatus case final status?)
+          (session: session, status: status),
+    ];
+    return CustomScrollView(
+      key: const PageStorageKey('files'),
+      slivers: [
+        const SliverAppBar(floating: true, title: Text('文件')),
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+          sliver: SliverToBoxAdapter(
+            child: _PageIntro(
+              eyebrow: '远程文件',
+              title: '文件',
+              subtitle: '选择主机，浏览和传输远程文件。',
+              trailing: '${widget.store.hosts.length} 主机',
+            ),
           ),
         ),
-      ),
-      if (widget.sessions.items.isEmpty)
-        const SliverFillRemaining(
-          hasScrollBody: false,
-          child: _EmptyStateMessage(
-            icon: Icons.terminal,
-            title: '还没有活动会话',
-            message: '从主机页连接服务器后，会话会显示在这里。',
-          ),
-        )
-      else
+        if (connecting)
+          const SliverToBoxAdapter(child: LinearProgressIndicator()),
         SliverPadding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
-          sliver: SliverList(
-            delegate: SliverChildBuilderDelegate((context, index) {
-              final session = widget.sessions.items[index];
+          sliver: SliverList.builder(
+            itemCount: widget.store.hosts.length,
+            itemBuilder: (context, index) {
+              final host = widget.store.hosts[index];
               return DecoratedBox(
                 decoration: BoxDecoration(
                   border: Border(
@@ -829,155 +808,100 @@ class _PocketHomeState extends State<PocketHome> {
                   ),
                 ),
                 child: ListTile(
-                  leading: Icon(
-                    Icons.circle,
-                    size: 10,
-                    color: session.connected
-                        ? AppPalette.success
-                        : Theme.of(context).colorScheme.error,
+                  leading: const Icon(Icons.folder_open_outlined),
+                  title: Text(host.name),
+                  subtitle: Text(
+                    SshTarget(host.host, host.port, host.username).label,
                   ),
-                  title: Text(session.profile.name),
-                  subtitle: Text(session.status),
                   trailing: const Icon(Icons.chevron_right),
-                  onTap: () => openSession(session),
+                  onTap: connecting ? null : () => connect(host, sftp: true),
                 ),
               );
-            }, childCount: widget.sessions.items.length),
+            },
           ),
         ),
-    ],
-  );
-
-  Widget transfersPage() => CustomScrollView(
-    key: const PageStorageKey('files'),
-    slivers: [
-      SliverAppBar(
-        floating: true,
-        title: const Text('文件'),
-        actions: [
-          IconButton(
-            tooltip: '设置',
-            onPressed: widget.store.loading ? null : openSettings,
-            icon: const Icon(Icons.settings_outlined),
+        if (transfers.isEmpty && widget.store.hosts.isEmpty)
+          const SliverFillRemaining(
+            hasScrollBody: false,
+            child: _EmptyStateMessage(
+              icon: Icons.folder_open_outlined,
+              title: '还没有可浏览的主机',
+              message: '在「主机」页添加主机后，就能在这里打开 SFTP。',
+            ),
+          ),
+        if (transfers.isNotEmpty) ...[
+          const SliverPadding(
+            padding: EdgeInsets.fromLTRB(22, 12, 22, 8),
+            sliver: SliverToBoxAdapter(child: _SectionTitle('传输任务')),
+          ),
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 22),
+            sliver: SliverList.builder(
+              itemCount: transfers.length,
+              itemBuilder: (context, index) {
+                final (:session, :status) = transfers[index];
+                final total = session.transferTotal;
+                final failed = status == '传输失败';
+                return DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                    ),
+                  ),
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.folder_open_outlined,
+                      color: failed
+                          ? Theme.of(context).colorScheme.error
+                          : null,
+                    ),
+                    title: Text(status),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(session.profile.name),
+                        const SizedBox(height: 4),
+                        Text('${session.transferBytes} bytes transferred'),
+                        LinearProgressIndicator(
+                          value: total == null || total == 0
+                              ? null
+                              : (session.transferBytes / total).clamp(0, 1),
+                        ),
+                      ],
+                    ),
+                    trailing: Wrap(
+                      children: [
+                        IconButton(
+                          tooltip: '取消',
+                          onPressed: session.cancelTransfer,
+                          icon: const Icon(Icons.close),
+                        ),
+                        IconButton(
+                          tooltip: '重试',
+                          onPressed: session.retryTransfer,
+                          icon: const Icon(Icons.refresh),
+                        ),
+                      ],
+                    ),
+                    onTap: () => Navigator.push<void>(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            SftpPage(session: session, store: widget.store),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
         ],
-      ),
-      SliverPadding(
-        padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
-        sliver: SliverToBoxAdapter(
-          child: _PageIntro(
-            eyebrow: '远程文件',
-            title: '文件',
-            subtitle: '选择主机，浏览和传输远程文件。',
-            trailing: '${widget.store.hosts.length} 主机',
-          ),
-        ),
-      ),
-      if (connecting)
-        const SliverToBoxAdapter(child: LinearProgressIndicator()),
-      SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 22),
-        sliver: SliverList.builder(
-          itemCount: widget.store.hosts.length,
-          itemBuilder: (context, index) {
-            final host = widget.store.hosts[index];
-            return DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-              ),
-              child: ListTile(
-                leading: const Icon(Icons.folder_open_outlined),
-                title: Text(host.name),
-                subtitle: Text(
-                  SshTarget(host.host, host.port, host.username).label,
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: connecting ? null : () => connect(host, sftp: true),
-              ),
-            );
-          },
-        ),
-      ),
-      if (widget.sessions.items.isEmpty && widget.store.hosts.isEmpty)
-        const SliverFillRemaining(
-          hasScrollBody: false,
-          child: _EmptyStateMessage(
-            icon: Icons.folder_open_outlined,
-            title: '还没有文件会话',
-            message: '添加主机后，从上方列表打开 SFTP。',
-          ),
-        )
-      else
-        SliverList(
-          delegate: SliverChildBuilderDelegate((context, index) {
-            final session = widget.sessions.items[index];
-            final failed = session.transferStatus == '传输失败';
-            return DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  bottom: BorderSide(
-                    color: Theme.of(context).colorScheme.outlineVariant,
-                  ),
-                ),
-              ),
-              child: ListTile(
-                leading: Icon(
-                  Icons.folder_open_outlined,
-                  color: failed ? Theme.of(context).colorScheme.error : null,
-                ),
-                title: Text(session.transferStatus ?? session.profile.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(session.profile.name),
-                    if (session.transferStatus != null) ...[
-                      const SizedBox(height: 4),
-                      Text('${session.transferBytes} bytes transferred'),
-                      LinearProgressIndicator(
-                        value:
-                            session.transferTotal == null ||
-                                session.transferTotal == 0
-                            ? null
-                            : (session.transferBytes / session.transferTotal!)
-                                  .clamp(0, 1),
-                      ),
-                    ],
-                  ],
-                ),
-                trailing: session.transferStatus != null
-                    ? Wrap(
-                        children: [
-                          IconButton(
-                            tooltip: '取消',
-                            onPressed: session.cancelTransfer,
-                            icon: const Icon(Icons.close),
-                          ),
-                          IconButton(
-                            tooltip: '重试',
-                            onPressed: session.retryTransfer,
-                            icon: const Icon(Icons.refresh),
-                          ),
-                        ],
-                      )
-                    : const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push<void>(
-                  context,
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        SftpPage(session: session, store: widget.store),
-                  ),
-                ),
-              ),
-            );
-          }, childCount: widget.sessions.items.length),
-        ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _AiHeaderRow {
@@ -1304,69 +1228,71 @@ class _SettingsPageState extends State<SettingsPage> {
     ),
   );
 
-  Widget _settingsHome() => Scaffold(
-    backgroundColor: Theme.of(context).colorScheme.surface,
-    appBar: AppBar(
-      title: const Text('设置'),
-      backgroundColor: Theme.of(context).colorScheme.surface,
-      surfaceTintColor: Colors.transparent,
-    ),
-    body: SafeArea(
-      top: false,
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 760),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
-            children: [
-              _SettingsGroupTitle('工作区'),
-              _SettingsEntry(
-                icon: Icons.palette_outlined,
-                title: '外观',
-                subtitle: '颜色模式与界面密度',
-                onTap: () => openSection('appearance'),
+  Widget _settingsHome() => CustomScrollView(
+    key: const PageStorageKey('settings'),
+    slivers: [
+      const SliverAppBar(floating: true, title: Text('设置')),
+      SliverToBoxAdapter(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: widget.store.loading
+                    ? const [Text('正在读取设置…')]
+                    : [
+                        _SettingsGroupTitle('工作区'),
+                        _SettingsEntry(
+                          icon: Icons.palette_outlined,
+                          title: '外观',
+                          subtitle: '颜色模式与界面密度',
+                          onTap: () => openSection('appearance'),
+                        ),
+                        _SettingsEntry(
+                          icon: Icons.terminal,
+                          title: '终端',
+                          subtitle: '字体、配色、命令历史与屏幕常亮',
+                          onTap: () => openSection('terminal'),
+                        ),
+                        const SizedBox(height: 18),
+                        _SettingsGroupTitle('AI 与连接'),
+                        _SettingsEntry(
+                          icon: Icons.auto_awesome_outlined,
+                          title: 'AI 助手',
+                          subtitle: widget.store.aiEndpoint.isEmpty
+                              ? '配置模型与接口'
+                              : '${widget.store.aiChannelLabel} · ${widget.store.aiModel}',
+                          onTap: () => openSection('ai'),
+                        ),
+                        _SettingsEntry(
+                          icon: Icons.shield_outlined,
+                          title: '安全与隐私',
+                          subtitle: '凭据保存与设备认证',
+                          onTap: () => openSection('security'),
+                        ),
+                        const SizedBox(height: 18),
+                        _SettingsGroupTitle('应用'),
+                        _SettingsEntry(
+                          icon: Icons.import_export,
+                          title: '配置备份',
+                          subtitle: '导入或导出主机配置',
+                          onTap: () => openSection('backup'),
+                        ),
+                        _SettingsEntry(
+                          icon: Icons.info_outline,
+                          title: '关于',
+                          subtitle: '应用信息与功能说明',
+                          onTap: () => openSection('about'),
+                        ),
+                      ],
               ),
-              _SettingsEntry(
-                icon: Icons.terminal,
-                title: '终端',
-                subtitle: '字体、配色、命令历史与屏幕常亮',
-                onTap: () => openSection('terminal'),
-              ),
-              const SizedBox(height: 18),
-              _SettingsGroupTitle('AI 与连接'),
-              _SettingsEntry(
-                icon: Icons.auto_awesome_outlined,
-                title: 'AI 助手',
-                subtitle: widget.store.aiEndpoint.isEmpty
-                    ? '配置模型与接口'
-                    : '${widget.store.aiChannelLabel} · ${widget.store.aiModel}',
-                onTap: () => openSection('ai'),
-              ),
-              _SettingsEntry(
-                icon: Icons.shield_outlined,
-                title: '安全与隐私',
-                subtitle: '凭据保存与设备认证',
-                onTap: () => openSection('security'),
-              ),
-              const SizedBox(height: 18),
-              _SettingsGroupTitle('应用'),
-              _SettingsEntry(
-                icon: Icons.import_export,
-                title: '配置备份',
-                subtitle: '导入或导出主机配置',
-                onTap: () => openSection('backup'),
-              ),
-              _SettingsEntry(
-                icon: Icons.info_outline,
-                title: '关于',
-                subtitle: '应用信息与功能说明',
-                onTap: () => openSection('about'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
-    ),
+    ],
   );
 
   Widget _appearanceSettings() => _settingsFrame('外观', [
