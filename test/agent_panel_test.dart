@@ -27,7 +27,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('AI 终端'), findsOneWidget);
+    expect(find.text('AI 助手  /  My server'), findsOneWidget);
     expect(find.textContaining('主用渠道 · test-model · Chat'), findsOneWidget);
     expect(find.textContaining('My server'), findsOneWidget);
     expect(find.text('发送'), findsOneWidget);
@@ -38,7 +38,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('危险模式').last);
     await tester.pumpAndSettle();
-    expect(find.textContaining('自动执行命令，可修改主机'), findsOneWidget);
+    expect(find.textContaining('危险模式：命令自动执行。'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     session.dispose();
     store.dispose();

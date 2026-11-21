@@ -417,87 +417,152 @@ class _SftpPageState extends State<SftpPage> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('SFTP 文件'),
-      actions: [
-        IconButton(
-          onPressed: mkdir,
-          icon: const Icon(Icons.create_new_folder_outlined),
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(widget.session.profile.name),
+            Text(
+              'SFTP  /  ${widget.session.profile.host}',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
         ),
-        IconButton(onPressed: pickUpload, icon: const Icon(Icons.upload_file)),
-        IconButton(
-          onPressed: () => load(directory),
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
-    ),
-    body: Column(
-      children: [
-        ListTile(
-          leading: IconButton(
-            onPressed: directory == '/'
-                ? null
-                : () => load(
-                    directory.substring(0, directory.lastIndexOf('/')).isEmpty
-                        ? '/'
-                        : directory.substring(0, directory.lastIndexOf('/')),
-                  ),
-            icon: const Icon(Icons.arrow_upward),
+        actions: [
+          IconButton(
+            tooltip: '新建文件夹',
+            onPressed: loading || _transferInProgress ? null : mkdir,
+            icon: const Icon(Icons.create_new_folder_outlined),
           ),
-          title: Text(directory, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ),
-        if (task.isNotEmpty)
-          LinearProgressIndicator(
-            value:
-                widget.session.transferTotal == null ||
-                    widget.session.transferTotal == 0
-                ? null
-                : (transferred / widget.session.transferTotal!)
-                      .clamp(0, 1)
-                      .toDouble(),
+          IconButton(
+            tooltip: '上传文件',
+            onPressed: loading || _transferInProgress ? null : pickUpload,
+            icon: const Icon(Icons.upload_file),
           ),
-        if (task.isNotEmpty)
-          ListTile(
-            title: Text(task),
-            subtitle: Text('$transferred bytes transferred'),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
+          IconButton(
+            tooltip: '刷新',
+            onPressed: loading ? null : () => load(directory),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            decoration: BoxDecoration(
+              color: colors.surfaceContainerLow,
+              border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+            ),
+            child: Row(
               children: [
                 IconButton(
-                  tooltip: '取消传输',
-                  onPressed: () => setState(() => cancelled = true),
-                  icon: const Icon(Icons.close),
+                  tooltip: '上一级',
+                  onPressed: directory == '/' || loading
+                      ? null
+                      : () => load(
+                          directory
+                                  .substring(0, directory.lastIndexOf('/'))
+                                  .isEmpty
+                              ? '/'
+                              : directory.substring(
+                                  0,
+                                  directory.lastIndexOf('/'),
+                                ),
+                        ),
+                  icon: const Icon(Icons.arrow_upward),
                 ),
-                IconButton(
-                  tooltip: '重试',
-                  onPressed: retryTask == null ? null : () => retryTask!(),
-                  icon: const Icon(Icons.refresh),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    directory,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontFamily: 'monospace'),
+                  ),
                 ),
               ],
             ),
           ),
-        if (error != null)
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+          if (task.isNotEmpty) ...[
+            LinearProgressIndicator(
+              value:
+                  widget.session.transferTotal == null ||
+                      widget.session.transferTotal == 0
+                  ? null
+                  : (transferred / widget.session.transferTotal!).clamp(0, 1),
             ),
-          ),
-        Expanded(
-          child: loading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView(
+            Container(
+              color: colors.surfaceContainerLow,
+              child: ListTile(
+                dense: true,
+                title: Text(task),
+                subtitle: Text('$transferred bytes transferred'),
+                trailing: Wrap(
                   children: [
-                    for (final entry in entries.where(
-                      (e) => e.filename != '..',
-                    ))
-                      ListTile(
+                    IconButton(
+                      tooltip: '取消传输',
+                      onPressed: () => setState(() => cancelled = true),
+                      icon: const Icon(Icons.close),
+                    ),
+                    IconButton(
+                      tooltip: '重试',
+                      onPressed: retryTask == null ? null : () => retryTask!(),
+                      icon: const Icon(Icons.refresh),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (error != null)
+            Container(
+              width: double.infinity,
+              color: colors.errorContainer,
+              padding: const EdgeInsets.all(14),
+              child: Text(
+                error!,
+                style: TextStyle(color: colors.onErrorContainer),
+              ),
+            ),
+          Expanded(
+            child: loading
+                ? const Center(child: CircularProgressIndicator())
+                : entries.where((entry) => entry.filename != '..').isEmpty
+                ? Center(
+                    child: Text(
+                      '此目录为空',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    itemCount: entries.where((e) => e.filename != '..').length,
+                    separatorBuilder: (_, _) => Divider(
+                      height: 1,
+                      indent: 50,
+                      color: colors.outlineVariant,
+                    ),
+                    itemBuilder: (context, index) {
+                      final entry = entries
+                          .where((e) => e.filename != '..')
+                          .elementAt(index);
+                      return ListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                        ),
                         leading: Icon(
                           entry.attr.isDirectory
                               ? Icons.folder_outlined
                               : Icons.insert_drive_file_outlined,
+                          color: entry.attr.isDirectory
+                              ? colors.primary
+                              : colors.onSurfaceVariant,
                         ),
                         title: Text(entry.filename),
                         subtitle: Text(
@@ -509,9 +574,9 @@ class _SftpPageState extends State<SftpPage> {
                             ? () => load(child(directory, entry.filename))
                             : null,
                         trailing: PopupMenuButton<String>(
-                          onSelected: (v) => v == 'download'
+                          onSelected: (value) => value == 'download'
                               ? download(entry)
-                              : action(v, entry),
+                              : action(value, entry),
                           itemBuilder: (_) => [
                             if (!entry.attr.isDirectory)
                               const PopupMenuItem(
@@ -528,13 +593,14 @@ class _SftpPageState extends State<SftpPage> {
                             ),
                           ],
                         ),
-                      ),
-                  ],
-                ),
-        ),
-      ],
-    ),
-  );
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 String formatSize(int size) => size < 1024

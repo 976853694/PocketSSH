@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -10,7 +9,6 @@ import '../../core/sessions.dart';
 import '../../core/ssh_connection.dart';
 import '../connection/connection_page.dart';
 import 'ai_panel.dart';
-import '../settings/glass_surface.dart';
 import 'sftp_page.dart';
 
 class TerminalPage extends StatefulWidget {
@@ -227,16 +225,14 @@ class _TerminalPageState extends State<TerminalPage> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      clipBehavior: Clip.antiAlias,
-      builder: (_) => GlassSurface(
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+      ),
+      builder: (_) => AiAgentPanel(
         store: widget.store,
-        radius: 28,
-        child: AiAgentPanel(
-          store: widget.store,
-          session: session,
-          selection: contextText,
-        ),
+        session: session,
+        selection: contextText,
       ),
     );
   }
@@ -485,18 +481,8 @@ class _TerminalPageState extends State<TerminalPage> {
 
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).colorScheme.surface.withValues(
-          alpha: widget.store.glassStyle == 'solid'
-              ? 1
-              : widget.store.glassOpacity.clamp(.35, .9),
-        ),
+        backgroundColor: Theme.of(context).colorScheme.surface,
         surfaceTintColor: Colors.transparent,
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-            child: const SizedBox.expand(),
-          ),
-        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -660,38 +646,48 @@ class _TerminalPageState extends State<TerminalPage> {
               ),
             ),
           if (session.connected)
-            GlassSurface(
-              store: widget.store,
-              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: SizedBox(
-                height: 48,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: [
-                    IconButton(
-                      tooltip: '打开键盘',
-                      onPressed: () => view.currentState?.requestKeyboard(),
-                      icon: const Icon(Icons.keyboard_outlined),
-                    ),
-                    for (final shortcut in _terminalKeys)
-                      _shortcut(shortcut.$1, shortcut.$2, shortcut.$3),
-                    if (widget.store.recentCommandHistory &&
-                        widget.store.recentCommands.isNotEmpty)
-                      TextButton.icon(
-                        onPressed: _showRecentCommands,
-                        icon: const Icon(Icons.history),
-                        label: const Text('最近命令'),
-                      ),
-                  ],
+            Container(
+              height: 48,
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLow,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
                 ),
+              ),
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                children: [
+                  IconButton(
+                    tooltip: '打开键盘',
+                    onPressed: () => view.currentState?.requestKeyboard(),
+                    icon: const Icon(Icons.keyboard_outlined),
+                  ),
+                  for (final shortcut in _terminalKeys)
+                    _shortcut(shortcut.$1, shortcut.$2, shortcut.$3),
+                  if (widget.store.recentCommandHistory &&
+                      widget.store.recentCommands.isNotEmpty)
+                    TextButton.icon(
+                      onPressed: _showRecentCommands,
+                      icon: const Icon(Icons.history),
+                      label: const Text('最近命令'),
+                    ),
+                ],
               ),
             ),
           if (session.connected)
-            GlassSurface(
-              store: widget.store,
-              margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              radius: 18,
+            Container(
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                border: Border(
+                  top: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(10, 5, 10, 8),
               child: Row(
                 children: [
                   Expanded(
@@ -704,10 +700,7 @@ class _TerminalPageState extends State<TerminalPage> {
                       decoration: InputDecoration(
                         hintText: '命令草稿 · 检查后发送',
                         isDense: true,
-                        filled: false,
-                        border: InputBorder.none,
-                        enabledBorder: InputBorder.none,
-                        focusedBorder: InputBorder.none,
+                        filled: true,
                         suffixIcon: IconButton(
                           onPressed: () {
                             draftController.clear();

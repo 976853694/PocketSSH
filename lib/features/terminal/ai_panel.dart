@@ -227,21 +227,45 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
             ),
             child: Column(
               children: [
-                ListTile(
-                  leading: const Icon(Icons.terminal),
-                  title: const Text('AI 终端'),
-                  subtitle: Text(
-                    '${widget.session.profile.name} · ${agent.status}',
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(20, 14, 12, 14),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(color: colors.outlineVariant),
+                    ),
                   ),
-                  trailing: IconButton(
-                    tooltip: '新建对话',
-                    onPressed: busy
-                        ? null
-                        : () {
-                            agent.clear();
-                            setState(() => localError = null);
-                          },
-                    icon: const Icon(Icons.add_comment_outlined),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'AI 助手  /  ${widget.session.profile.name}',
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              agent.status,
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(color: colors.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '新建对话',
+                        onPressed: busy
+                            ? null
+                            : () {
+                                agent.clear();
+                                setState(() => localError = null);
+                              },
+                        icon: const Icon(Icons.add_comment_outlined),
+                      ),
+                    ],
                   ),
                 ),
                 Padding(
@@ -277,19 +301,22 @@ class _AiAgentPanelState extends State<AiAgentPanel> {
                     ],
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '目标：$target${current ? '' : '（SSH 未连接）'}\n'
-                      '${mode == AgentMode.dangerous ? '自动执行命令，可修改主机。' : '命令执行前由你审查。'}结果会发送至 ${aiBaseUrl(widget.store.aiEndpoint)?.host ?? '配置的 AI 服务'}。\n'
-                      '上下文 ${agent.usageEstimated ? '估算 ' : ''}${agent.contextTokens}/${widget.store.aiContextTokens} tokens · 已压缩 ${agent.compressionCount} 次',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: mode == AgentMode.dangerous
-                            ? colors.error
-                            : null,
-                      ),
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.all(12),
+                  color: mode == AgentMode.dangerous
+                      ? colors.errorContainer
+                      : colors.surfaceContainerLow,
+                  child: Text(
+                    '目标  $target${current ? '' : '（SSH 未连接）'}\n'
+                    '${mode == AgentMode.dangerous ? '危险模式：命令自动执行。' : '审查模式：每条命令执行前需批准。'}\n'
+                    '${aiBaseUrl(widget.store.aiEndpoint)?.host ?? 'AI 服务'}  ·  ${agent.usageEstimated ? '估算 ' : ''}${agent.contextTokens}/${widget.store.aiContextTokens} tokens  ·  压缩 ${agent.compressionCount} 次',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: mode == AgentMode.dangerous
+                          ? colors.onErrorContainer
+                          : colors.onSurfaceVariant,
+                      height: 1.5,
                     ),
                   ),
                 ),

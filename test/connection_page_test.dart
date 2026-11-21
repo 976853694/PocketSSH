@@ -30,17 +30,21 @@ void main() {
           home: PocketHome(store: store, sessions: sessions),
         ),
       );
-      expect(find.text('Pocket SSH'), findsOneWidget);
-      expect(find.text('主机'), findsOneWidget);
+      expect(find.text('连接工作台'), findsOneWidget);
+      expect(find.text('远程访问  /  SSH'), findsOneWidget);
+      expect(find.byType(Card), findsNothing);
+      expect(find.text('你的服务器，随时就绪。'), findsNothing);
+      expect(find.text('主机'), findsNWidgets(2));
       expect(find.text('会话'), findsOneWidget);
       expect(find.text('文件'), findsOneWidget);
-      expect(find.text('你的服务器，随时就绪。'), findsOneWidget);
+      expect(find.text('你的服务器，随时就绪。'), findsNothing);
+      expect(find.text('远程访问  /  SSH'), findsOneWidget);
       expect(find.text('快速连接'), findsOneWidget);
-      await tester.tap(find.text('文件'));
+      await tester.tap(find.text('文件').first);
       await tester.pumpAndSettle();
-      expect(find.text('SFTP WORKSPACE'), findsOneWidget);
+      expect(find.text('远程文件'), findsOneWidget);
       expect(find.text('选择主机，浏览和传输远程文件。'), findsOneWidget);
-      await tester.tap(find.text('主机'));
+      await tester.tap(find.text('主机').first);
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('设置'));
       await tester.pumpAndSettle();
@@ -50,9 +54,8 @@ void main() {
       expect(find.text('安全与隐私'), findsOneWidget);
       await tester.tap(find.text('外观'));
       await tester.pumpAndSettle();
-      expect(find.text('液态'), findsOneWidget);
-      expect(find.text('毛玻璃'), findsOneWidget);
-      expect(find.text('透明度 72%'), findsOneWidget);
+      expect(find.text('应用主题'), findsOneWidget);
+      expect(find.text('系统模式会跟随设备浅色或深色外观。'), findsOneWidget);
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.tap(find.text('AI 助手'));
@@ -67,6 +70,27 @@ void main() {
       store.dispose();
     },
   );
+
+  testWidgets('wide workspace switches to a side navigation rail', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1100, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = AppStore();
+    final sessions = Sessions();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: PocketHome(store: store, sessions: sessions),
+      ),
+    );
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.byType(NavigationBar), findsNothing);
+    expect(tester.takeException(), isNull);
+    sessions.dispose();
+    store.dispose();
+  });
 
   testWidgets('host list action buttons fit on a narrow screen', (
     tester,

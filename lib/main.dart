@@ -1,7 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show ImageFilter;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -18,7 +16,6 @@ import 'core/ssh_connection.dart';
 import 'features/connection/connection_page.dart';
 import 'features/terminal/sftp_page.dart';
 import 'features/terminal/terminal_page.dart';
-import 'features/settings/glass_surface.dart';
 
 void main() => runApp(const PocketSshApp());
 
@@ -79,10 +76,9 @@ class _PocketSshAppState extends State<PocketSshApp> {
   );
 
   ThemeData _theme(Brightness brightness) {
-    final dark = brightness == Brightness.dark;
     final colors = AppPalette.scheme(brightness);
     final fieldBorder = OutlineInputBorder(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(10),
       borderSide: BorderSide(color: colors.outlineVariant),
     );
     return ThemeData(
@@ -90,17 +86,19 @@ class _PocketSshAppState extends State<PocketSshApp> {
       colorScheme: colors,
       scaffoldBackgroundColor: colors.surface,
       appBarTheme: AppBarTheme(
-        backgroundColor: colors.surface.withValues(
-          alpha: store.glassStyle == 'solid' ? 1 : .94,
-        ),
+        backgroundColor: colors.surface,
         surfaceTintColor: Colors.transparent,
         foregroundColor: colors.onSurface,
+        toolbarHeight: 64,
+        titleTextStyle: TextStyle(
+          color: colors.onSurface,
+          fontSize: 19,
+          fontWeight: FontWeight.w700,
+        ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: colors.surfaceContainerHighest.withValues(
-          alpha: dark ? .48 : .62,
-        ),
+        fillColor: colors.surfaceContainerHighest,
         border: fieldBorder,
         enabledBorder: fieldBorder,
         focusedBorder: fieldBorder.copyWith(
@@ -114,14 +112,13 @@ class _PocketSshAppState extends State<PocketSshApp> {
       cardTheme: CardThemeData(
         elevation: 0,
         color: colors.surfaceContainerLow,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18),
-          side: BorderSide(color: colors.outlineVariant.withValues(alpha: .75)),
-        ),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: colors.surface,
         elevation: 0,
+        height: 68,
         indicatorColor: colors.primaryContainer,
         labelTextStyle: WidgetStatePropertyAll(
           TextStyle(color: colors.onSurfaceVariant),
@@ -136,6 +133,13 @@ class _PocketSshAppState extends State<PocketSshApp> {
         backgroundColor: colors.inverseSurface,
         contentTextStyle: TextStyle(color: colors.onInverseSurface),
         behavior: SnackBarBehavior.floating,
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+          minimumSize: const Size(48, 46),
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }
@@ -426,82 +430,58 @@ class _PocketHomeState extends State<PocketHome> {
       children: [hostsPage(), sessionsPage(), transfersPage()],
     );
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: Stack(
-        children: [
-          Positioned.fill(child: GlassBackdrop(store: widget.store)),
-          SafeArea(
-            child: wide
-                ? Row(
-                    children: [
-                      NavigationRail(
-                        backgroundColor: Theme.of(context).colorScheme.surface
-                            .withValues(
-                              alpha: widget.store.glassStyle == 'solid'
-                                  ? 1
-                                  : widget.store.glassOpacity.clamp(.35, .9),
-                            ),
-                        extended: true,
-                        selectedIndex: tab,
-                        onDestinationSelected: (index) =>
-                            setState(() => tab = index),
-                        destinations: const [
-                          NavigationRailDestination(
-                            icon: Icon(Icons.dns_outlined),
-                            label: Text('主机'),
-                          ),
-                          NavigationRailDestination(
-                            icon: Icon(Icons.terminal),
-                            label: Text('会话'),
-                          ),
-                          NavigationRailDestination(
-                            icon: Icon(Icons.folder_open_outlined),
-                            label: Text('文件'),
-                          ),
-                        ],
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      body: SafeArea(
+        child: wide
+            ? Row(
+                children: [
+                  NavigationRail(
+                    backgroundColor: Theme.of(context).colorScheme.surface,
+                    extended: true,
+                    selectedIndex: tab,
+                    onDestinationSelected: (index) =>
+                        setState(() => tab = index),
+                    destinations: const [
+                      NavigationRailDestination(
+                        icon: Icon(Icons.dns_outlined),
+                        label: Text('主机'),
                       ),
-                      const VerticalDivider(width: 1),
-                      Expanded(child: page),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.terminal),
+                        label: Text('会话'),
+                      ),
+                      NavigationRailDestination(
+                        icon: Icon(Icons.folder_open_outlined),
+                        label: Text('文件'),
+                      ),
                     ],
-                  )
-                : page,
-          ),
-        ],
+                  ),
+                  VerticalDivider(
+                    width: 1,
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                  Expanded(child: page),
+                ],
+              )
+            : page,
       ),
       bottomNavigationBar: wide
           ? null
-          : ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(
-                  sigmaX: widget.store.glassStyle == 'solid' ? 0 : 22,
-                  sigmaY: widget.store.glassStyle == 'solid' ? 0 : 22,
+          : NavigationBar(
+              selectedIndex: tab,
+              onDestinationSelected: (index) => setState(() => tab = index),
+              destinations: const [
+                NavigationDestination(
+                  icon: Icon(Icons.dns_outlined),
+                  selectedIcon: Icon(Icons.dns),
+                  label: '主机',
                 ),
-                child: NavigationBar(
-                  backgroundColor: Theme.of(context).colorScheme.surface
-                      .withValues(
-                        alpha: widget.store.glassStyle == 'solid'
-                            ? 1
-                            : widget.store.glassOpacity.clamp(.35, .9),
-                      ),
-                  selectedIndex: tab,
-                  onDestinationSelected: (index) => setState(() => tab = index),
-                  destinations: const [
-                    NavigationDestination(
-                      icon: Icon(Icons.dns_outlined),
-                      selectedIcon: Icon(Icons.dns),
-                      label: '主机',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.terminal),
-                      label: '会话',
-                    ),
-                    NavigationDestination(
-                      icon: Icon(Icons.folder_open_outlined),
-                      label: '文件',
-                    ),
-                  ],
+                NavigationDestination(icon: Icon(Icons.terminal), label: '会话'),
+                NavigationDestination(
+                  icon: Icon(Icons.folder_open_outlined),
+                  label: '文件',
                 ),
-              ),
+              ],
             ),
     );
   }
@@ -582,10 +562,7 @@ class _PocketHomeState extends State<PocketHome> {
       slivers: [
         SliverAppBar(
           floating: true,
-          title: const Text(
-            'Pocket SSH',
-            style: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.3),
-          ),
+          title: const Text('主机'),
           actions: [
             IconButton(
               onPressed: openSettings,
@@ -595,7 +572,7 @@ class _PocketHomeState extends State<PocketHome> {
           ],
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+          padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
           sliver: SliverToBoxAdapter(
             child: _WorkspaceHero(
               hostCount: widget.store.hosts.length,
@@ -608,7 +585,7 @@ class _PocketHomeState extends State<PocketHome> {
           ),
         ),
         SliverPadding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+          padding: const EdgeInsets.fromLTRB(22, 8, 22, 18),
           sliver: SliverToBoxAdapter(
             child: TextField(
               onChanged: (value) => setState(() => filter = value),
@@ -633,11 +610,11 @@ class _PocketHomeState extends State<PocketHome> {
         else
           for (final group in groups) ...[
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+              padding: const EdgeInsets.fromLTRB(22, 12, 22, 8),
               sliver: SliverToBoxAdapter(child: _SectionTitle(group)),
             ),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 22),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
@@ -652,29 +629,23 @@ class _PocketHomeState extends State<PocketHome> {
                     final activeSession = widget.sessions.items
                         .where((session) => session.profile.id == host.id)
                         .firstOrNull;
-                    return Card(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      clipBehavior: Clip.antiAlias,
+                    return DecoratedBox(
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                          ),
+                        ),
+                      ),
                       child: ListTile(
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
                           vertical: 6,
                         ),
-                        leading: Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.primaryContainer,
-                            borderRadius: BorderRadius.circular(13),
-                          ),
-                          child: Icon(
-                            host.keyAuth
-                                ? Icons.key_rounded
-                                : Icons.dns_outlined,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
+                        leading: Icon(
+                          host.keyAuth ? Icons.key_rounded : Icons.dns_outlined,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          size: 21,
                         ),
                         title: Row(
                           children: [
@@ -706,12 +677,12 @@ class _PocketHomeState extends State<PocketHome> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            IconButton.filledTonal(
+                            IconButton(
                               tooltip: '连接 ${host.name}',
                               onPressed: connecting
                                   ? null
                                   : () => connect(host),
-                              icon: const Icon(Icons.terminal),
+                              icon: const Icon(Icons.arrow_outward),
                             ),
                             PopupMenuButton<String>(
                               onSelected: (value) {
@@ -788,7 +759,7 @@ class _PocketHomeState extends State<PocketHome> {
     slivers: [
       SliverAppBar(
         floating: true,
-        title: const Text('Pocket SSH'),
+        title: const Text('会话'),
         actions: [
           IconButton(
             tooltip: '设置',
@@ -801,7 +772,7 @@ class _PocketHomeState extends State<PocketHome> {
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
         sliver: SliverToBoxAdapter(
           child: _PageIntro(
-            eyebrow: 'LIVE CONNECTIONS',
+            eyebrow: '实时状态',
             title: '会话',
             subtitle: '管理正在运行的 SSH 终端。',
             trailing:
@@ -820,19 +791,24 @@ class _PocketHomeState extends State<PocketHome> {
         )
       else
         SliverPadding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 22),
           sliver: SliverList(
             delegate: SliverChildBuilderDelegate((context, index) {
               final session = widget.sessions.items[index];
-              return Card(
-                margin: const EdgeInsets.only(bottom: 10),
-                clipBehavior: Clip.antiAlias,
+              return DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border(
+                    bottom: BorderSide(
+                      color: Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                ),
                 child: ListTile(
                   leading: Icon(
                     Icons.circle,
-                    size: 12,
+                    size: 10,
                     color: session.connected
-                        ? Theme.of(context).colorScheme.primary
+                        ? AppPalette.success
                         : Theme.of(context).colorScheme.error,
                   ),
                   title: Text(session.profile.name),
@@ -851,7 +827,7 @@ class _PocketHomeState extends State<PocketHome> {
     slivers: [
       SliverAppBar(
         floating: true,
-        title: const Text('Pocket SSH'),
+        title: const Text('文件'),
         actions: [
           IconButton(
             tooltip: '设置',
@@ -864,7 +840,7 @@ class _PocketHomeState extends State<PocketHome> {
         padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
         sliver: SliverToBoxAdapter(
           child: _PageIntro(
-            eyebrow: 'SFTP WORKSPACE',
+            eyebrow: '远程文件',
             title: '文件',
             subtitle: '选择主机，浏览和传输远程文件。',
             trailing: '${widget.store.hosts.length} 主机',
@@ -875,10 +851,16 @@ class _PocketHomeState extends State<PocketHome> {
         const SliverToBoxAdapter(child: LinearProgressIndicator()),
       for (final host in widget.store.hosts)
         SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+          padding: const EdgeInsets.symmetric(horizontal: 22),
           sliver: SliverToBoxAdapter(
-            child: Card(
-              clipBehavior: Clip.antiAlias,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+              ),
               child: ListTile(
                 leading: const Icon(Icons.folder_open_outlined),
                 title: Text(host.name),
@@ -905,9 +887,14 @@ class _PocketHomeState extends State<PocketHome> {
           delegate: SliverChildBuilderDelegate((context, index) {
             final session = widget.sessions.items[index];
             final failed = session.transferStatus == '传输失败';
-            return Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
-              clipBehavior: Clip.antiAlias,
+            return DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                  ),
+                ),
+              ),
               child: ListTile(
                 leading: Icon(
                   Icons.folder_open_outlined,
@@ -1271,7 +1258,7 @@ class _SettingsPageState extends State<SettingsPage> {
     backgroundColor: Theme.of(context).colorScheme.surface,
     appBar: AppBar(
       title: Text(title),
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       surfaceTintColor: Colors.transparent,
     ),
     body: SafeArea(
@@ -1292,7 +1279,7 @@ class _SettingsPageState extends State<SettingsPage> {
     backgroundColor: Theme.of(context).colorScheme.surface,
     appBar: AppBar(
       title: const Text('设置'),
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       surfaceTintColor: Colors.transparent,
     ),
     body: SafeArea(
@@ -1305,14 +1292,12 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               _SettingsGroupTitle('工作区'),
               _SettingsEntry(
-                store: widget.store,
                 icon: Icons.palette_outlined,
                 title: '外观',
-                subtitle: '主题、液态玻璃与透明度',
+                subtitle: '颜色模式与界面密度',
                 onTap: () => openSection('appearance'),
               ),
               _SettingsEntry(
-                store: widget.store,
                 icon: Icons.terminal,
                 title: '终端',
                 subtitle: '字体、配色、命令历史与屏幕常亮',
@@ -1321,7 +1306,6 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 18),
               _SettingsGroupTitle('AI 与连接'),
               _SettingsEntry(
-                store: widget.store,
                 icon: Icons.auto_awesome_outlined,
                 title: 'AI 助手',
                 subtitle: widget.store.aiEndpoint.isEmpty
@@ -1330,7 +1314,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 onTap: () => openSection('ai'),
               ),
               _SettingsEntry(
-                store: widget.store,
                 icon: Icons.shield_outlined,
                 title: '安全与隐私',
                 subtitle: '凭据保存与设备认证',
@@ -1339,14 +1322,12 @@ class _SettingsPageState extends State<SettingsPage> {
               const SizedBox(height: 18),
               _SettingsGroupTitle('应用'),
               _SettingsEntry(
-                store: widget.store,
                 icon: Icons.import_export,
                 title: '配置备份',
                 subtitle: '导入或导出主机配置',
                 onTap: () => openSection('backup'),
               ),
               _SettingsEntry(
-                store: widget.store,
                 icon: Icons.info_outline,
                 title: '关于',
                 subtitle: '应用信息与功能说明',
@@ -1362,7 +1343,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _appearanceSettings() => _settingsFrame('外观', [
     const _SectionTitle('应用主题'),
     _SettingsPanel(
-      store: widget.store,
       padding: const EdgeInsets.all(16),
       child: SegmentedButton<String>(
         segments: const [
@@ -1377,60 +1357,15 @@ class _SettingsPageState extends State<SettingsPage> {
         },
       ),
     ),
-    const _SectionTitle('玻璃材质'),
-    GlassSurface(
-      store: widget.store,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SegmentedButton<String>(
-            segments: const [
-              ButtonSegment(
-                value: 'liquid',
-                icon: Icon(Icons.water_drop_outlined),
-                label: Text('液态'),
-              ),
-              ButtonSegment(
-                value: 'frosted',
-                icon: Icon(Icons.blur_on_outlined),
-                label: Text('毛玻璃'),
-              ),
-              ButtonSegment(
-                value: 'solid',
-                icon: Icon(Icons.crop_square),
-                label: Text('不透明'),
-              ),
-            ],
-            selected: {widget.store.glassStyle},
-            onSelectionChanged: (value) async {
-              setState(() => widget.store.glassStyle = value.first);
-              await widget.store.save();
-            },
-          ),
-          if (widget.store.glassStyle != 'solid') ...[
-            const SizedBox(height: 12),
-            Text('透明度 ${(widget.store.glassOpacity * 100).round()}%'),
-            Slider(
-              value: widget.store.glassOpacity.clamp(.35, .9),
-              min: .35,
-              max: .9,
-              divisions: 11,
-              onChanged: (value) =>
-                  setState(() => widget.store.glassOpacity = value),
-              onChangeEnd: (_) => widget.store.save(),
-            ),
-          ],
-          const Text('液态与毛玻璃仅用于导航、卡片和浮层；终端内容保持清晰高对比。'),
-        ],
-      ),
+    const Padding(
+      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Text('系统模式会跟随设备浅色或深色外观。'),
     ),
   ]);
 
   Widget _terminalSettings() => _settingsFrame('终端', [
     const _SectionTitle('显示'),
     _SettingsPanel(
-      store: widget.store,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1468,7 +1403,6 @@ class _SettingsPageState extends State<SettingsPage> {
     ),
     const _SectionTitle('操作'),
     _SettingsPanel(
-      store: widget.store,
       child: Column(
         children: [
           SwitchListTile(
@@ -1499,7 +1433,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _securitySettings() => _settingsFrame('安全与隐私', [
     const _SectionTitle('设备安全'),
     _SettingsPanel(
-      store: widget.store,
       child: SwitchListTile(
         title: const Text('读取已保存凭据前进行设备认证'),
         subtitle: const Text('使用锁屏 PIN、图案或生物认证'),
@@ -1516,7 +1449,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _backupSettings() => _settingsFrame('配置备份', [
     const _SectionTitle('主机配置'),
     _SettingsPanel(
-      store: widget.store,
       child: Column(
         children: [
           ListTile(
@@ -1539,7 +1471,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _aboutSettings() => _settingsFrame('关于', [
     _SettingsPanel(
-      store: widget.store,
       child: const ListTile(
         leading: Icon(Icons.terminal),
         title: Text('Pocket SSH'),
@@ -1565,7 +1496,7 @@ class _SettingsPageState extends State<SettingsPage> {
     backgroundColor: Theme.of(context).colorScheme.surface,
     appBar: AppBar(
       title: const Text('AI 助手'),
-      backgroundColor: Colors.transparent,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       surfaceTintColor: Colors.transparent,
     ),
     body: SafeArea(
@@ -1578,7 +1509,6 @@ class _SettingsPageState extends State<SettingsPage> {
             children: [
               const _SectionTitle('模型连接'),
               _SettingsPanel(
-                store: widget.store,
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1857,30 +1787,13 @@ class _SettingsPageState extends State<SettingsPage> {
 }
 
 class _SettingsPanel extends StatelessWidget {
-  const _SettingsPanel({
-    required this.store,
-    required this.child,
-    this.padding = EdgeInsets.zero,
-  });
+  const _SettingsPanel({required this.child, this.padding = EdgeInsets.zero});
 
-  final AppStore store;
   final Widget child;
   final EdgeInsetsGeometry padding;
 
   @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Container(
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow.withValues(
-          alpha: store.glassStyle == 'solid' ? 1 : .98,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: .5)),
-      ),
-      child: Padding(padding: padding, child: child),
-    );
-  }
+  Widget build(BuildContext context) => Padding(padding: padding, child: child);
 }
 
 class _WorkspaceHero extends StatelessWidget {
@@ -1899,137 +1812,70 @@ class _WorkspaceHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              AppPalette.heroTop,
-              AppPalette.heroMiddle,
-              AppPalette.heroBottom,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 20),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(color: colors.outlineVariant, width: 1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '远程访问  /  SSH',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: colors.primary,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 1.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '连接工作台',
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              color: colors.onSurface,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -.6,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '管理服务器、打开终端，或传输远程文件。',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: colors.onSurfaceVariant),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 20,
+            runSpacing: 8,
+            children: [
+              _HeroMetric(value: '$hostCount', label: '台已保存'),
+              _HeroMetric(value: '$sessionCount', label: '个在线会话'),
             ],
           ),
-          boxShadow: [
-            BoxShadow(
-              color: colors.primary.withValues(alpha: .15),
-              blurRadius: 30,
-              offset: const Offset(0, 14),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -56,
-              right: -32,
-              child: Container(
-                width: 190,
-                height: 190,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: .08),
-                  ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 10,
+            runSpacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: onQuickConnect,
+                icon: const Icon(Icons.bolt_rounded),
+                label: const Text('快速连接'),
+              ),
+              Tooltip(
+                message: '添加主机',
+                child: OutlinedButton.icon(
+                  onPressed: onAddHost,
+                  icon: const Icon(Icons.add),
+                  label: const Text('添加主机'),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(22),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.shield_outlined,
-                        size: 16,
-                        color: AppPalette.heroHighlight,
-                      ),
-                      const SizedBox(width: 7),
-                      Expanded(
-                        child: Text(
-                          'SECURE REMOTE WORKSPACE',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(
-                                color: AppPalette.heroText,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 1.1,
-                              ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    '你的服务器，随时就绪。',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -.4,
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    '安全连接主机，继续终端与文件工作。',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: .78),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Wrap(
-                    spacing: 18,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      _HeroMetric(value: '$hostCount', label: '已保存主机'),
-                      Container(
-                        width: 1,
-                        height: 30,
-                        color: Colors.white.withValues(alpha: .22),
-                      ),
-                      _HeroMetric(value: '$sessionCount', label: '在线会话'),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      FilledButton.icon(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppPalette.heroButton,
-                          foregroundColor: AppPalette.heroButtonText,
-                        ),
-                        onPressed: onQuickConnect,
-                        icon: const Icon(Icons.bolt_rounded),
-                        label: const Text('快速连接'),
-                      ),
-                      Tooltip(
-                        message: '添加主机',
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            side: BorderSide(
-                              color: Colors.white.withValues(alpha: .42),
-                            ),
-                          ),
-                          onPressed: onAddHost,
-                          icon: const Icon(Icons.add),
-                          label: const Text('添加主机'),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -2044,33 +1890,24 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final color = active ? colors.primary : colors.tertiary;
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: .12),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            ),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+    final color = active ? AppPalette.success : colors.error;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 7,
+          height: 7,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
-      ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -2114,23 +1951,11 @@ class _PageIntro extends StatelessWidget {
                 ),
               ),
             ),
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.primaryContainer.withValues(alpha: .55),
-                borderRadius: BorderRadius.circular(99),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                child: Text(
-                  trailing,
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: colors.onPrimaryContainer,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+            Text(
+              trailing,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: colors.primary,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -2149,24 +1974,30 @@ class _HeroMetric extends StatelessWidget {
   final String label;
 
   @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Text(
-        value,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-          color: Colors.white,
-          fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text(
+          value,
+          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+            color: colors.onSurface,
+            fontWeight: FontWeight.w700,
+          ),
         ),
-      ),
-      const SizedBox(width: 8),
-      Text(
-        label,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: Colors.white.withValues(alpha: .76),
+        const SizedBox(width: 7),
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.labelMedium?.copyWith(color: colors.onSurfaceVariant),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _SettingsGroupTitle extends StatelessWidget {
@@ -2179,10 +2010,9 @@ class _SettingsGroupTitle extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
     child: Text(
       label,
-      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-        color: Theme.of(context).colorScheme.primary,
-        fontWeight: FontWeight.w800,
-        letterSpacing: 1.3,
+      style: Theme.of(context).textTheme.labelMedium?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        fontWeight: FontWeight.w700,
       ),
     ),
   );
@@ -2190,14 +2020,12 @@ class _SettingsGroupTitle extends StatelessWidget {
 
 class _SettingsEntry extends StatelessWidget {
   const _SettingsEntry({
-    required this.store,
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
   });
 
-  final AppStore store;
   final IconData icon;
   final String title;
   final String subtitle;
@@ -2206,27 +2034,23 @@ class _SettingsEntry extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.outlineVariant)),
+      ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+            padding: const EdgeInsets.symmetric(vertical: 14),
             child: Row(
               children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: colors.primaryContainer.withValues(alpha: .55),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(icon, color: colors.primary),
+                SizedBox(
+                  width: 30,
+                  child: Icon(icon, color: colors.onSurfaceVariant, size: 21),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -2248,7 +2072,11 @@ class _SettingsEntry extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(Icons.chevron_right, color: colors.onSurfaceVariant),
+                Icon(
+                  Icons.arrow_forward,
+                  color: colors.onSurfaceVariant,
+                  size: 17,
+                ),
               ],
             ),
           ),

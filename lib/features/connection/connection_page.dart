@@ -125,166 +125,217 @@ class _ConnectionPageState extends State<ConnectionPage> {
       ),
     ),
     body: SafeArea(
-      child: Form(
-        key: form,
-        child: ListView(
-          padding: const EdgeInsets.all(20),
-          children: [
-            if (!widget.quick) ...[
-              TextFormField(
-                controller: name,
-                decoration: const InputDecoration(labelText: '名称'),
-              ),
-              const SizedBox(height: 12),
-            ],
-            TextFormField(
-              controller: host,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              decoration: const InputDecoration(labelText: '服务器地址'),
-              validator: (v) =>
-                  normalizeHost(v ?? '') == null ? '请输入有效的主机名或 IP' : null,
-            ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: Form(
+            key: form,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(22, 20, 22, 32),
               children: [
-                Expanded(
-                  child: TextFormField(
-                    controller: user,
-                    decoration: const InputDecoration(labelText: '用户名'),
-                    validator: (v) =>
-                        (v ?? '').trim().isEmpty ? '请输入用户名' : null,
+                Text(
+                  widget.quick
+                      ? '打开一次性 SSH 会话。'
+                      : initial == null
+                      ? '保存连接信息，稍后继续工作。'
+                      : '更新这台服务器的连接信息。',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-                const SizedBox(width: 12),
-                SizedBox(
-                  width: 100,
-                  child: TextFormField(
-                    controller: port,
-                    decoration: const InputDecoration(labelText: '端口'),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    validator: (v) {
-                      final n = int.tryParse(v ?? '');
-                      return n == null || n < 1 || n > 65535 ? '1–65535' : null;
-                    },
+                const SizedBox(height: 22),
+                const _ConnectionSectionLabel('连接目标'),
+                if (!widget.quick) ...[
+                  TextFormField(
+                    controller: name,
+                    decoration: const InputDecoration(labelText: '名称'),
                   ),
+                  const SizedBox(height: 12),
+                ],
+                TextFormField(
+                  controller: host,
+                  keyboardType: TextInputType.url,
+                  autocorrect: false,
+                  decoration: const InputDecoration(labelText: '服务器地址'),
+                  validator: (v) =>
+                      normalizeHost(v ?? '') == null ? '请输入有效的主机名或 IP' : null,
                 ),
-              ],
-            ),
-            if (!widget.quick) ...[
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: group,
-                decoration: const InputDecoration(labelText: '分组'),
-              ),
-            ],
-            const SizedBox(height: 16),
-            SegmentedButton<bool>(
-              segments: const [
-                ButtonSegment(
-                  value: false,
-                  label: Text('密码'),
-                  icon: Icon(Icons.password),
-                ),
-                ButtonSegment(
-                  value: true,
-                  label: Text('私钥'),
-                  icon: Icon(Icons.key),
-                ),
-              ],
-              selected: {keyAuth},
-              onSelectionChanged: (v) => setState(() => keyAuth = v.first),
-            ),
-            if (!widget.quick)
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('加密保存凭据'),
-                value: remember,
-                onChanged: (v) => setState(() => remember = v),
-              ),
-            if (widget.store case final store?)
-              ExpansionTile(
-                title: const Text('高级连接'),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: TextFormField(
-                      controller: localPort,
-                      onChanged: (_) => setState(() {}),
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: '本地转发端口（可选）',
-                      ),
-                      validator: (value) {
-                        if ((value ?? '').trim().isEmpty) return null;
-                        final number = int.tryParse(value!.trim());
-                        return number == null || number < 1 || number > 65535
-                            ? '端口需在 1–65535 之间'
-                            : null;
-                      },
-                    ),
-                  ),
-                  if ((localPort.text.trim().isNotEmpty ||
-                      initial?.localForwardPort != null)) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
                       child: TextFormField(
-                        controller: forwardHost,
-                        decoration: const InputDecoration(labelText: '转发目标主机'),
+                        controller: user,
+                        decoration: const InputDecoration(labelText: '用户名'),
+                        validator: (v) =>
+                            (v ?? '').trim().isEmpty ? '请输入用户名' : null,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 100,
                       child: TextFormField(
-                        controller: forwardPort,
+                        controller: port,
+                        decoration: const InputDecoration(labelText: '端口'),
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: '转发目标端口'),
-                        validator: (value) {
-                          final number = int.tryParse(value ?? '');
-                          return number == null || number < 1 || number > 65535
-                              ? '端口需在 1–65535 之间'
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                        ],
+                        validator: (v) {
+                          final n = int.tryParse(v ?? '');
+                          return n == null || n < 1 || n > 65535
+                              ? '1–65535'
                               : null;
                         },
                       ),
                     ),
                   ],
-                  DropdownButtonFormField<String>(
-                    initialValue:
-                        store.hosts.any(
-                          (h) =>
-                              h.id == jumpId &&
-                              h.id != initial?.id &&
-                              h.jumpId == null,
-                        )
-                        ? jumpId
-                        : '',
-                    decoration: const InputDecoration(labelText: '跳板机'),
-                    items: [
-                      const DropdownMenuItem(value: '', child: Text('直连')),
-                      for (final h in store.hosts.where(
-                        (h) => h.id != initial?.id && h.jumpId == null,
-                      ))
-                        DropdownMenuItem(
-                          value: h.id,
-                          child: Text(h.name, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (v) =>
-                        setState(() => jumpId = v == '' ? null : v),
+                ),
+                if (!widget.quick) ...[
+                  const SizedBox(height: 22),
+                  const _ConnectionSectionLabel('整理与归档'),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: group,
+                    decoration: const InputDecoration(labelText: '分组'),
                   ),
                 ],
-              ),
-            const SizedBox(height: 16),
-            FilledButton.icon(
-              onPressed: saving ? null : save,
-              icon: Icon(widget.quick ? Icons.terminal : Icons.check),
-              label: Text(widget.quick ? '连接' : '保存主机'),
+                const SizedBox(height: 22),
+                const _ConnectionSectionLabel('认证方式'),
+                const SizedBox(height: 10),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment(
+                      value: false,
+                      label: Text('密码'),
+                      icon: Icon(Icons.password),
+                    ),
+                    ButtonSegment(
+                      value: true,
+                      label: Text('私钥'),
+                      icon: Icon(Icons.key),
+                    ),
+                  ],
+                  selected: {keyAuth},
+                  onSelectionChanged: (v) => setState(() => keyAuth = v.first),
+                ),
+                if (!widget.quick)
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('加密保存凭据'),
+                    value: remember,
+                    onChanged: (v) => setState(() => remember = v),
+                  ),
+                if (widget.store case final store?)
+                  ExpansionTile(
+                    title: const Text('高级连接'),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: TextFormField(
+                          controller: localPort,
+                          onChanged: (_) => setState(() {}),
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '本地转发端口（可选）',
+                          ),
+                          validator: (value) {
+                            if ((value ?? '').trim().isEmpty) return null;
+                            final number = int.tryParse(value!.trim());
+                            return number == null ||
+                                    number < 1 ||
+                                    number > 65535
+                                ? '端口需在 1–65535 之间'
+                                : null;
+                          },
+                        ),
+                      ),
+                      if ((localPort.text.trim().isNotEmpty ||
+                          initial?.localForwardPort != null)) ...[
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: TextFormField(
+                            controller: forwardHost,
+                            decoration: const InputDecoration(
+                              labelText: '转发目标主机',
+                            ),
+                          ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: TextFormField(
+                            controller: forwardPort,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: '转发目标端口',
+                            ),
+                            validator: (value) {
+                              final number = int.tryParse(value ?? '');
+                              return number == null ||
+                                      number < 1 ||
+                                      number > 65535
+                                  ? '端口需在 1–65535 之间'
+                                  : null;
+                            },
+                          ),
+                        ),
+                      ],
+                      DropdownButtonFormField<String>(
+                        initialValue:
+                            store.hosts.any(
+                              (h) =>
+                                  h.id == jumpId &&
+                                  h.id != initial?.id &&
+                                  h.jumpId == null,
+                            )
+                            ? jumpId
+                            : '',
+                        decoration: const InputDecoration(labelText: '跳板机'),
+                        items: [
+                          const DropdownMenuItem(value: '', child: Text('直连')),
+                          for (final h in store.hosts.where(
+                            (h) => h.id != initial?.id && h.jumpId == null,
+                          ))
+                            DropdownMenuItem(
+                              value: h.id,
+                              child: Text(
+                                h.name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) =>
+                            setState(() => jumpId = v == '' ? null : v),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: 22),
+                FilledButton.icon(
+                  onPressed: saving ? null : save,
+                  icon: Icon(widget.quick ? Icons.terminal : Icons.check),
+                  label: Text(widget.quick ? '连接' : '保存主机'),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
+    ),
+  );
+}
+
+class _ConnectionSectionLabel extends StatelessWidget {
+  const _ConnectionSectionLabel(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    title,
+    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+      color: Theme.of(context).colorScheme.primary,
+      fontWeight: FontWeight.w700,
     ),
   );
 }

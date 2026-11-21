@@ -200,56 +200,63 @@ class _AgentMessage extends StatelessWidget {
     animation: event,
     builder: (context, _) {
       final lineEnd = event.text.indexOf('\n');
-      return Card(
-        color: event.kind == 'user'
-            ? Theme.of(context).colorScheme.primaryContainer
-            : null,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: event.kind == 'tool'
-              ? ExpansionTile(
-                  tilePadding: EdgeInsets.zero,
-                  title: Text(event.status),
-                  subtitle: Text(
-                    lineEnd < 0 ? event.text : event.text.substring(0, lineEnd),
-                  ),
-                  children: [
-                    SelectableText(
-                      event.text,
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      event.kind == 'user'
-                          ? '你'
-                          : event.kind == 'context'
-                          ? event.status
-                          : 'Agent',
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                    const SizedBox(height: 6),
-                    SelectableText(event.text.isEmpty ? '正在思考…' : event.text),
-                    if (event.text.isNotEmpty)
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: IconButton(
-                          tooltip: '复制',
-                          onPressed: () => Clipboard.setData(
-                            ClipboardData(text: event.text),
-                          ),
-                          icon: const Icon(Icons.copy, size: 18),
-                        ),
-                      ),
-                  ],
-                ),
+      final colors = Theme.of(context).colorScheme;
+      final userMessage = event.kind == 'user';
+      return Container(
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: userMessage ? colors.primaryContainer : null,
+          border: Border(
+            left: BorderSide(
+              color: userMessage ? colors.primary : colors.outlineVariant,
+              width: userMessage ? 3 : 1,
+            ),
+            bottom: BorderSide(color: colors.outlineVariant),
+          ),
         ),
+        child: event.kind == 'tool'
+            ? ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                title: Text(event.status),
+                subtitle: Text(
+                  lineEnd < 0 ? event.text : event.text.substring(0, lineEnd),
+                ),
+                children: [
+                  SelectableText(
+                    event.text,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    event.kind == 'user'
+                        ? '你'
+                        : event.kind == 'context'
+                        ? event.status
+                        : 'Agent',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(event.text.isEmpty ? '正在思考…' : event.text),
+                  if (event.text.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        tooltip: '复制',
+                        onPressed: () =>
+                            Clipboard.setData(ClipboardData(text: event.text)),
+                        icon: const Icon(Icons.copy, size: 18),
+                      ),
+                    ),
+                ],
+              ),
       );
     },
   );

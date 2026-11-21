@@ -11,20 +11,17 @@ double _contrast(Color first, Color second) {
 }
 
 void main() {
-  test(
-    'light palette uses a cool paper surface and readable blue-cyan accent',
-    () {
-      final colors = AppPalette.scheme(Brightness.light);
-      expect(colors.surface, AppPalette.lightSurface);
-      expect(colors.primary, AppPalette.lightPrimary);
-      expect(colors.onSurface, isNot(colors.surface));
-      expect(colors.error, AppPalette.lightError);
-      expect(_contrast(colors.primary, colors.surface), greaterThan(4.5));
-      expect(_contrast(colors.onSurface, colors.surface), greaterThan(7));
-    },
-  );
+  test('light palette uses warm paper and a readable clay accent', () {
+    final colors = AppPalette.scheme(Brightness.light);
+    expect(colors.surface, AppPalette.lightSurface);
+    expect(colors.primary, AppPalette.lightPrimary);
+    expect(colors.onSurface, isNot(colors.surface));
+    expect(colors.error, AppPalette.lightError);
+    expect(_contrast(colors.primary, colors.surface), greaterThan(4.5));
+    expect(_contrast(colors.onSurface, colors.surface), greaterThan(7));
+  });
 
-  test('dark palette uses a navy surface and luminous cyan accent', () {
+  test('dark palette uses charcoal and a luminous terracotta accent', () {
     final colors = AppPalette.scheme(Brightness.dark);
     expect(colors.surface, AppPalette.darkSurface);
     expect(colors.primary, AppPalette.darkPrimary);
